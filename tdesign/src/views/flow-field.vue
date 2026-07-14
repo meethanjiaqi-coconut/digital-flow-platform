@@ -20,6 +20,7 @@ import { inject, onBeforeUnmount, provide, ref, shallowRef, watch } from 'vue'
 import { FlowFieldData } from '@/flowfield/FlowFieldData'
 import { FlowFieldController } from '@/flowfield/FlowFieldController'
 import { WaterSurfacePrimitive } from '@/flowfield/WaterSurfacePrimitive'
+import { ParticleFlowLayer } from '@/flowfield/ParticleFlowLayer'
 
 const syncRef = inject('getSync')
 const state = ref('loading')
@@ -56,6 +57,11 @@ function setupScene(data) {
     viewer.scene.primitives.add(water)
     controller.addLayer(water)
     controller.water = water
+    const particles = new ParticleFlowLayer(data, viewer)
+    particles.setExaggeration(controller.exaggeration)
+    viewer.scene.primitives.add(particles)
+    controller.addLayer(particles)
+    controller.particles = particles
     viewer.scene.camera.flyTo({
         destination: SuperMap3D.Cartesian3.fromDegrees(120.9, 29.6, 170000),
         orientation: { heading: 0, pitch: SuperMap3D.Math.toRadians(-55), roll: 0 },
