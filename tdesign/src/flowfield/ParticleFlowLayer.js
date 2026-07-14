@@ -99,6 +99,8 @@ uniform vec4 u_bbox;
 uniform float u_exagg;
 uniform vec2 u_viewport;
 uniform float u_width;   // 头部半宽(像素)
+uniform mat4 u_vp;       // 显式传入当前相机 投影×视图(手动 execute 时 czm_* 不可靠)
+uniform vec3 u_camPos;   // 相机世界坐标(地平线剔除)
 varying float v_speed;
 varying float v_end;
 varying float v_side;
@@ -125,8 +127,18 @@ void main() {
         return;
     }
     float h = f.a * u_exagg + 12.0;
-    vec4 clipH = czm_viewProjection * vec4(toEcef(head.xy, h), 1.0);
-    vec4 clipT = czm_viewProjection * vec4(toEcef(tail.xy, h), 1.0);
+    vec3 posH = toEcef(head.xy, h);
+    // 椭球地平线剔除:域转到地球背面时不再穿透显示
+    vec3 cv = u_camPos / A;
+    vec3 tv = posH / A - cv;
+    float vhMag2 = dot(cv, cv) - 1.0;
+    float dd = dot(-cv, tv);
+    if (dd > 0.0 && dd * dd / dot(tv, tv) > vhMag2) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+    }
+    vec4 clipH = u_vp * vec4(posH, 1.0);
+    vec4 clipT = u_vp * vec4(toEcef(tail.xy, h), 1.0);
     vec2 sH = clipH.xy / max(clipH.w, 1e-6) * u_viewport;
     vec2 sT = clipT.xy / max(clipT.w, 1e-6) * u_viewport;
     vec2 dir = sH - sT;
@@ -470,10 +482,22 @@ export class ParticleFlowLayer {
         let s = centerLat - spanLat / 2
         let n = centerLat + spanLat / 2
         // 平移回域内再钳制
-        if (w < dw) { e += dw - w; w = dw }
-        if (e > de) { w -= e - de; e = de }
-        if (s < ds) { n += ds - s; s = ds }
-        if (n > dn) { s -= n - dn; n = dn }
+        if (w < dw) {
+            e += dw - w
+            w = dw
+        }
+        if (e > de) {
+            w -= e - de
+            e = de
+        }
+        if (s < ds) {
+            n += ds - s
+            s = ds
+        }
+        if (n > dn) {
+            s -= n - dn
+            n = dn
+        }
         w = Math.max(w, dw)
         s = Math.max(s, ds)
         if (!(e > w) || !(n > s)) {
@@ -579,6 +603,10 @@ export class ParticleFlowLayer {
         const dt = this._lastNow === undefined ? 0.016 : Math.min((now - this._lastNow) / 1000, 0.1)
         this._lastNow = now
         this._frame++
+        // 显式取当前相机矩阵:手动 execute 时 czm_* 环境状态可能是上一 pass 的残留
+        const cam = frameState.camera
+        this._vp = S.Matrix4.multiply(cam.frustum.projectionMatrix, cam.viewMatrix, this._vp || new S.Matrix4())
+        this._camPos = S.Cartesian3.clone(cam.positionWC, this._camPos || new S.Cartesian3())
         const bboxArr = this._bbox
         const bboxUniform = () => new S.Cartesian4(bboxArr[0], bboxArr[1], bboxArr[2], bboxArr[3])
         const speedScale = bboxArr[2] * 0.045 // 1 m/s 每秒横跨视野约 4.5%
@@ -645,7 +673,9 @@ export class ParticleFlowLayer {
                     u_exagg: () => this._exagg,
                     u_viewport: () => new S.Cartesian2(this._trailW, this._trailH),
                     u_width: () => this._width,
-                    u_ramp: () => this._rampTex
+                    u_ramp: () => this._rampTex,
+                    u_vp: () => this._vp,
+                    u_camPos: () => this._camPos
                 }
             })
             this._trailPingIsA = !this._trailPingIsA
