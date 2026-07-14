@@ -1,0 +1,19 @@
+/*
+自定义全局样式变量
+*/
+:root,
+.theme-blue {
+    --theme-color-base: #409eff;
+    --theme-color-text: #fff;
+    --theme-color-active: #409eff;
+
+    /* layout */
+    --layout-header-background-color: #fff;
+    --layout-background-color: #3359ac;
+    --layout-header-background-image: linear-gradient(180deg, #3359ac 0%, #2f6fb6 100%);
+    --layout-header-menu-text-color: var(--theme-color-text);
+    --layout-header-menu-active-text-color: var(--theme-color-active);
+}
+
+.theme-dark {
+}

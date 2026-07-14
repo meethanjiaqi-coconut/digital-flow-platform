@@ -1,0 +1,52 @@
+@use './var.css';
+@use 'flex.css';
+@use './t-design.scss';
+
+//  全局样式
+* {
+    margin: 0;
+    padding: 0;
+    list-style-type: none;
+    box-sizing: border-box;
+    outline: none;
+    user-select: none;
+}
+
+html {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    font-size: 16px;
+}
+
+body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: 'Microsoft YaHei', serif;
+}
+
+#app {
+    width: 100%;
+    height: 100%;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    background-color: #fff;
+    background-size: cover;
+}
+
+/* 滚动条全局样式 */
+::-webkit-scrollbar {
+    width: 4px;
+    height: 9px;
+    background-color: #ffffff7a;
+}
+
+::-webkit-scrollbar-thumb {
+    // border-radius:5px;
+    -webkit-box-shadow: inset 0 0 6px rgba(0, 0, 0, 0.3);
+    background-color: rgba(0, 0, 0, 0.1);
+}

@@ -1,0 +1,12 @@
+{
+    "version": "0.0.1",
+    "configurations": [
+        {
+            "name": "flowfield-dev",
+            "runtimeExecutable": "pnpm",
+            "runtimeArgs": ["dev"],
+            "cwd": "D:/git_repo/digital-flow-field/tdesign",
+            "port": 5175
+        }
+    ]
+}
