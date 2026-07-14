@@ -133,7 +133,7 @@ void main() {
     vec3 tv = posH / A - cv;
     float vhMag2 = dot(cv, cv) - 1.0;
     float dd = dot(-cv, tv);
-    if (dd > 0.0 && dd * dd / dot(tv, tv) > vhMag2) {
+    if (dd > vhMag2 && dd * dd / dot(tv, tv) > vhMag2) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         return;
     }
