@@ -14,6 +14,10 @@
             <t-select v-model="dim" size="small" style="width: 96px" :options="dimOpts" @change="v => c.particles.setCount(v)" />
         </div>
         <div class="item col">
+            <span>粒子粗细 {{ width.toFixed(1) }}px</span>
+            <t-slider v-model="width" :min="0.5" :max="5" :step="0.1" :label="false" @change="v => c.particles.setWidth(v)" />
+        </div>
+        <div class="item col">
             <span>水位夸张 ×{{ exagg }}</span>
             <t-slider v-model="exagg" :min="1" :max="200" :step="1" :label="false" @change="onExagg" />
         </div>
@@ -46,6 +50,7 @@ const c = props.controller
 const waterOn = ref(true)
 const particlesOn = ref(true)
 const dim = ref(256)
+const width = ref(1.5) // 与 ParticleFlowLayer 默认线宽一致
 const exagg = ref(c.exaggeration)
 const palette = ref(c.palette)
 const colorMode = ref(0)

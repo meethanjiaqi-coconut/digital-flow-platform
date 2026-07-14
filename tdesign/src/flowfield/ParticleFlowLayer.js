@@ -201,7 +201,7 @@ export class ParticleFlowLayer {
         this._fieldH = 1024
         this._fade = 0.965
         this._opacity = 1.0
-        this._width = 2.4 // 条带头部半宽(像素)
+        this._width = 1.5 // 条带头部半宽(像素)
         this._pendingA = null
         this._pendingB = null
         this._bbox = null // [xmin,ymin,xspan,yspan]
@@ -380,9 +380,30 @@ export class ParticleFlowLayer {
             context,
             indexBuffer: this._ribbonIdx,
             attributes: [
-                { index: 0, vertexBuffer: this._ribbonBuf, componentsPerAttribute: 2, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 16, offsetInBytes: 0 },
-                { index: 1, vertexBuffer: this._ribbonBuf, componentsPerAttribute: 1, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 16, offsetInBytes: 8 },
-                { index: 2, vertexBuffer: this._ribbonBuf, componentsPerAttribute: 1, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 16, offsetInBytes: 12 }
+                {
+                    index: 0,
+                    vertexBuffer: this._ribbonBuf,
+                    componentsPerAttribute: 2,
+                    componentDatatype: S.ComponentDatatype.FLOAT,
+                    strideInBytes: 16,
+                    offsetInBytes: 0
+                },
+                {
+                    index: 1,
+                    vertexBuffer: this._ribbonBuf,
+                    componentsPerAttribute: 1,
+                    componentDatatype: S.ComponentDatatype.FLOAT,
+                    strideInBytes: 16,
+                    offsetInBytes: 8
+                },
+                {
+                    index: 2,
+                    vertexBuffer: this._ribbonBuf,
+                    componentsPerAttribute: 1,
+                    componentDatatype: S.ComponentDatatype.FLOAT,
+                    strideInBytes: 16,
+                    offsetInBytes: 12
+                }
             ]
         })
         this._nRibbonIndices = n * 6
@@ -481,7 +502,14 @@ export class ParticleFlowLayer {
                 : !!gl.getExtension('OES_texture_float') && !!gl.getExtension('WEBGL_color_buffer_float')
             const uintIndex = isWebGL2 || !!gl.getExtension('OES_element_index_uint')
             if (!floatRenderable || !uintIndex) {
-                console.warn('[ParticleFlowLayer] GPU 能力不足(float 渲染或 uint 索引缺失),粒子层禁用。isWebGL2=', isWebGL2, 'floatRenderable=', floatRenderable, 'uintIndex=', uintIndex)
+                console.warn(
+                    '[ParticleFlowLayer] GPU 能力不足(float 渲染或 uint 索引缺失),粒子层禁用。isWebGL2=',
+                    isWebGL2,
+                    'floatRenderable=',
+                    floatRenderable,
+                    'uintIndex=',
+                    uintIndex
+                )
                 this.show = false
                 return
             }
@@ -655,7 +683,18 @@ export class ParticleFlowLayer {
         if (this._ready) {
             this._destroyParticles()
             this._destroyTrails()
-            for (const k of ['_fieldVA', '_fieldFB', '_fieldTex', '_lonlatBuf', '_dataABuf', '_dataBBuf', '_meshIndexBuf', '_quadVA', '_quadBuf', '_rampTex']) {
+            for (const k of [
+                '_fieldVA',
+                '_fieldFB',
+                '_fieldTex',
+                '_lonlatBuf',
+                '_dataABuf',
+                '_dataBBuf',
+                '_meshIndexBuf',
+                '_quadVA',
+                '_quadBuf',
+                '_rampTex'
+            ]) {
                 if (this[k] && this[k].destroy && !(this[k].isDestroyed && this[k].isDestroyed())) this[k].destroy()
                 this[k] = undefined
             }
