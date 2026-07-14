@@ -154,11 +154,12 @@ void main() {
 `
 const RIBBON_FS = `
 uniform sampler2D u_ramp;
+uniform float u_speedMax;
 varying float v_speed;
 varying float v_end;
 varying float v_side;
 void main() {
-    vec3 c = texture2D(u_ramp, vec2(clamp(v_speed / 2.5, 0.02, 0.98), 0.5)).rgb;
+    vec3 c = texture2D(u_ramp, vec2(clamp(v_speed / u_speedMax, 0.02, 0.98), 0.5)).rgb;
     float edge = 1.0 - abs(v_side);
     float a = smoothstep(0.0, 0.55, edge) * mix(0.4, 1.0, v_end);
     gl_FragColor = vec4(c * a, a);
@@ -214,6 +215,7 @@ export class ParticleFlowLayer {
         this._fade = 0.965
         this._opacity = 1.0
         this._width = 1.5 // 条带头部半宽(像素)
+        this._speedMax = (data.meta && data.meta.stats && data.meta.stats.speedMax) || 2.5
         this._pendingA = null
         this._pendingB = null
         this._bbox = null // [xmin,ymin,xspan,yspan]
@@ -587,7 +589,7 @@ export class ParticleFlowLayer {
             Math.abs(nb[3] - ob[3]) > ob[3] * 0.08
         if (moved) {
             this._bbox = nb
-            this._clearTrails = true
+            this._dissolve = 14 // 软消散:短时加速衰减代替硬清空
         }
         if (context.drawingBufferWidth !== this._trailW || context.drawingBufferHeight !== this._trailH) {
             this._destroyTrails()
@@ -651,12 +653,14 @@ export class ParticleFlowLayer {
                     new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: t.fb }).execute(context)
                 }
             }
+            const fadeNow = this._dissolve > 0 ? 0.72 : this._fade
+            if (this._dissolve > 0) this._dissolve--
             this._drawOffscreen(context, {
                 sp: this._fadeSP,
                 va: this._quadVA,
                 fb: trailCurr.fb,
                 rs: this._mkOffscreenRS(this._trailW, this._trailH),
-                uniformMap: { u_trail: () => trailPrev.tex, u_fade: () => this._fade }
+                uniformMap: { u_trail: () => trailPrev.tex, u_fade: () => fadeNow }
             })
             this._drawOffscreen(context, {
                 sp: this._ribbonSP,
@@ -675,7 +679,8 @@ export class ParticleFlowLayer {
                     u_width: () => this._width,
                     u_ramp: () => this._rampTex,
                     u_vp: () => this._vp,
-                    u_camPos: () => this._camPos
+                    u_camPos: () => this._camPos,
+                    u_speedMax: () => this._speedMax
                 }
             })
             this._trailPingIsA = !this._trailPingIsA

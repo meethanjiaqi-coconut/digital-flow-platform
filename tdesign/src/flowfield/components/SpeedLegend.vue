@@ -3,7 +3,11 @@
         <template v-if="mode === 0">
             <div class="bar speed"></div>
             <div class="ticks">
-                <span>0</span><span>0.6</span><span>1.2</span><span>1.9</span><span>2.5+ m/s</span>
+                <span>0</span>
+                <span>{{ (speedMax * 0.25).toFixed(1) }}</span>
+                <span>{{ (speedMax * 0.5).toFixed(1) }}</span>
+                <span>{{ (speedMax * 0.75).toFixed(1) }}</span>
+                <span>{{ speedMax.toFixed(1) }} m/s</span>
             </div>
         </template>
         <template v-else>
@@ -21,7 +25,8 @@
 defineProps({
     mode: { type: Number, default: 0 }, // 0=流速 1=水位
     min: { type: Number, default: -3.5 },
-    max: { type: Number, default: 6.5 }
+    max: { type: Number, default: 6.5 },
+    speedMax: { type: Number, default: 2.5 }
 })
 </script>
 

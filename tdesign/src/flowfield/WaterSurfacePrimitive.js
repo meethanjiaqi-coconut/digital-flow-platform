@@ -12,6 +12,7 @@ attribute vec3 position;
 attribute vec2 lonlat;
 attribute vec4 dataA;
 attribute vec4 dataB;
+attribute float zb;
 uniform float u_t;
 uniform float u_exagg;
 uniform float u_time;
@@ -24,6 +25,8 @@ varying vec2 v_uv;
 varying vec3 v_normalEC;
 varying vec3 v_posEC;
 varying vec2 v_gerst; // Gerstner 大波坡度(east/north)
+varying float v_depth; // 真实水深 m
+varying float v_crest; // 波峰归一 [-1,1]
 void main() {
     vec4 d = mix(dataA, dataB, u_t);
     v_flow = d.yz;
@@ -57,6 +60,8 @@ void main() {
     float Q = 0.55; // choppiness:水平位移让波峰更尖
     vec2 horiz = d1 * (a1 * Q * sin(p1)) + d2 * (a2 * Q * sin(p2)) + d3 * (a3 * Q * sin(p3));
     float h = d.x * u_exagg + eta;
+    v_depth = max(d.x - zb, 0.0);
+    v_crest = eta / (a1 + a2 + a3 + 1e-4);
     vec3 pos = position + up * h + east * horiz.x + north * horiz.y;
     v_gerst = grad;
     v_uv = lonlat * 125.0; // 1 tile ≈ 0.008°
@@ -75,7 +80,10 @@ varying vec2 v_uv;
 varying vec3 v_normalEC;
 varying vec3 v_posEC;
 varying vec2 v_gerst;
+varying float v_depth;
+varying float v_crest;
 uniform sampler2D u_normalMap;
+uniform float u_speedMax;
 uniform float u_time;
 uniform float u_palette;
 uniform float u_colorMode;  // 0=流速着色 1=水位云图
@@ -93,6 +101,9 @@ void main() {
     float blendPh = abs(phase0 * 2.0 - 1.0);
     vec3 nTS = mix(n1, n2, blendPh);
     nTS.xy += v_gerst * 1.6; // Gerstner 大波坡度并入法线
+    // 远景衰减法线扰动:抑制高光闪烁与贴图平铺感
+    float normFade = clamp(1.0 - (length(v_posEC) - 30000.0) / 250000.0, 0.15, 1.0);
+    nTS.xy *= normFade;
     nTS = normalize(nTS + vec3(0.0, 0.0, 2.6 / (0.35 + spd)));
     vec3 N = normalize(v_normalEC);
     vec3 T = normalize(cross(vec3(0.0, 0.0, 1.0), N) + vec3(1e-3));
@@ -101,7 +112,7 @@ void main() {
     vec3 viewDir = normalize(-v_posEC);
     float fresnel = pow(1.0 - max(dot(viewDir, normalEC), 0.0), 3.0);
     fresnel = mix(0.06, 0.9, fresnel);
-    float sn = clamp(spd / 2.5, 0.0, 1.0);
+    float sn = clamp(spd / u_speedMax, 0.0, 1.0);
     vec3 waterColor;
     if (u_colorMode > 0.5) {
         // 水位云图:蓝→青→绿→黄→红
@@ -121,12 +132,15 @@ void main() {
         vec3 fast = mix(vec3(0.5, 0.83, 0.88), vec3(0.15, 0.9, 1.0), u_palette);
         waterColor = mix(deep, mid, smoothstep(0.0, 0.45, sn));
         waterColor = mix(waterColor, fast, smoothstep(0.45, 1.0, sn));
+        // 水深着色:潮滩浅水偏黄绿透亮,深槽深邃
+        vec3 shallowCol = mix(vec3(0.24, 0.43, 0.36), vec3(0.1, 0.48, 0.52), u_palette);
+        waterColor = mix(shallowCol, waterColor * 0.88, smoothstep(0.0, 12.0, v_depth));
     }
     vec3 sky = mix(vec3(0.5, 0.66, 0.82), vec3(0.1, 0.3, 0.55), u_palette);
     vec3 L = normalize(czm_sunDirectionEC);
     vec3 H = normalize(L + viewDir);
     float ndh = max(dot(normalEC, H), 0.0);
-    float spec = pow(ndh, 240.0) * 1.4 + pow(ndh, 36.0) * 0.12;
+    float spec = (pow(ndh, 240.0) * 1.4 + pow(ndh, 36.0) * 0.12) * mix(0.3, 1.0, normFade);
     // 云图模式弱化反射与高光,保证色彩可读
     float skyMix = fresnel * (u_colorMode > 0.5 ? 0.3 : 1.0);
     float specMix = u_colorMode > 0.5 ? 0.35 : 1.0;
@@ -135,11 +149,12 @@ void main() {
     float noise = texture2D(u_normalMap, v_uv * 2.3 + flowDir * phase0 * 0.25).a;
     float foamBand = smoothstep(0.22, 0.42, v_wet) * (1.0 - smoothstep(0.42, 0.8, v_wet));
     float foam = foamBand * smoothstep(0.35, 0.7, noise) * 1.1
-               + smoothstep(0.72, 1.0, sn) * smoothstep(0.45, 0.85, noise) * 0.7;
+               + smoothstep(1.6, 2.4, spd) * smoothstep(0.45, 0.85, noise) * 0.7
+               + smoothstep(0.55, 0.95, v_crest) * smoothstep(0.9, 1.8, spd) * smoothstep(0.3, 0.7, noise) * 0.8;
     color = mix(color, vec3(0.93, 0.97, 1.0), clamp(foam, 0.0, 0.85));
     float alpha = u_colorMode > 0.5
         ? 0.82 + sn * 0.05
-        : 0.62 + fresnel * 0.28 + sn * 0.1;
+        : (0.62 + fresnel * 0.28 + sn * 0.1) * mix(0.72, 1.0, smoothstep(0.0, 8.0, v_depth));
     alpha *= smoothstep(0.22, 0.55, v_wet);
     gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.94));
 }
@@ -158,10 +173,8 @@ export class WaterSurfacePrimitive {
         this._palette = 0
         this._colorMode = 0
         const st = (data.meta && data.meta.stats) || {}
-        this._levelRange = new SuperMap3D.Cartesian2(
-            st.levelMin !== undefined ? st.levelMin : -3.5,
-            st.levelMax !== undefined ? st.levelMax : 6.5
-        )
+        this._levelRange = new SuperMap3D.Cartesian2(st.levelMin !== undefined ? st.levelMin : -3.5, st.levelMax !== undefined ? st.levelMax : 6.5)
+        this._speedMax = st.speedMax || 2.5
         this._time0 = performance.now()
         this._center = SuperMap3D.Cartesian3.fromDegrees(centerLonLat[0], centerLonLat[1], 0)
         this._modelMatrix = SuperMap3D.Matrix4.fromTranslation(this._center, new SuperMap3D.Matrix4())
@@ -209,13 +222,14 @@ export class WaterSurfacePrimitive {
         this._lonlatBuf = mk(lonlat, S.BufferUsage.STATIC_DRAW)
         this._dataABuf = mk(new Float32Array(n * 4), S.BufferUsage.DYNAMIC_DRAW)
         this._dataBBuf = mk(new Float32Array(n * 4), S.BufferUsage.DYNAMIC_DRAW)
+        this._zbBuf = mk(data.zb, S.BufferUsage.STATIC_DRAW)
         this._indexBuf = S.Buffer.createIndexBuffer({
             context,
             typedArray: data.tri,
             usage: S.BufferUsage.STATIC_DRAW,
             indexDatatype: S.IndexDatatype.UNSIGNED_SHORT
         })
-        const attributeLocations = { position: 0, lonlat: 1, dataA: 2, dataB: 3 }
+        const attributeLocations = { position: 0, lonlat: 1, dataA: 2, dataB: 3, zb: 4 }
         this._va = new S.VertexArray({
             context,
             indexBuffer: this._indexBuf,
@@ -223,7 +237,8 @@ export class WaterSurfacePrimitive {
                 { index: 0, vertexBuffer: this._posBuf, componentsPerAttribute: 3, componentDatatype: S.ComponentDatatype.FLOAT },
                 { index: 1, vertexBuffer: this._lonlatBuf, componentsPerAttribute: 2, componentDatatype: S.ComponentDatatype.FLOAT },
                 { index: 2, vertexBuffer: this._dataABuf, componentsPerAttribute: 4, componentDatatype: S.ComponentDatatype.FLOAT },
-                { index: 3, vertexBuffer: this._dataBBuf, componentsPerAttribute: 4, componentDatatype: S.ComponentDatatype.FLOAT }
+                { index: 3, vertexBuffer: this._dataBBuf, componentsPerAttribute: 4, componentDatatype: S.ComponentDatatype.FLOAT },
+                { index: 4, vertexBuffer: this._zbBuf, componentsPerAttribute: 1, componentDatatype: S.ComponentDatatype.FLOAT }
             ]
         })
         this._sp = S.ShaderProgram.fromCache({
@@ -274,6 +289,7 @@ export class WaterSurfacePrimitive {
                 u_palette: () => self._palette,
                 u_colorMode: () => self._colorMode,
                 u_levelRange: () => self._levelRange,
+                u_speedMax: () => self._speedMax,
                 u_centerWorld: () => self._center,
                 u_normalMap: () => self._normalTexture
             }

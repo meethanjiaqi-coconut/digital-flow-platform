@@ -35,7 +35,7 @@
                 <t-radio-button :value="1">科技蓝</t-radio-button>
             </t-radio-group>
         </div>
-        <speed-legend :mode="colorMode" :min="lvMin" :max="lvMax" />
+        <speed-legend :mode="colorMode" :min="lvMin" :max="lvMax" :speed-max="spdMax" />
     </div>
 </template>
 
@@ -56,6 +56,7 @@ const palette = ref(c.palette)
 const colorMode = ref(0)
 const lvMin = c.data.meta.stats.levelMin
 const lvMax = c.data.meta.stats.levelMax
+const spdMax = c.data.meta.stats.speedMax || 2.5
 const dimOpts = [
     { label: '1.6万', value: 128 },
     { label: '6.5万', value: 256 },
