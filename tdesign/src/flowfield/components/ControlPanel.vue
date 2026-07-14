@@ -3,28 +3,35 @@
         <div class="ff-panel-title">数字流场</div>
         <div class="item">
             <span>水面效果</span>
-            <t-switch v-model="waterOn" size="small" @change="(v) => (c.water.show = v)" />
+            <t-switch v-model="waterOn" size="small" @change="v => (c.water.show = v)" />
         </div>
         <div class="item">
             <span>粒子效果</span>
-            <t-switch v-model="particlesOn" size="small" @change="(v) => (c.particles.show = v)" />
+            <t-switch v-model="particlesOn" size="small" @change="v => (c.particles.show = v)" />
         </div>
         <div class="item">
             <span>粒子数量</span>
-            <t-select v-model="dim" size="small" style="width: 96px" :options="dimOpts" @change="(v) => c.particles.setCount(v)" />
+            <t-select v-model="dim" size="small" style="width: 96px" :options="dimOpts" @change="v => c.particles.setCount(v)" />
         </div>
         <div class="item col">
             <span>水位夸张 ×{{ exagg }}</span>
             <t-slider v-model="exagg" :min="1" :max="200" :step="1" :label="false" @change="onExagg" />
         </div>
         <div class="item">
+            <span>着色</span>
+            <t-radio-group v-model="colorMode" size="small" variant="default-filled" @change="v => c.water.setColorMode(v)">
+                <t-radio-button :value="0">流速</t-radio-button>
+                <t-radio-button :value="1">水位</t-radio-button>
+            </t-radio-group>
+        </div>
+        <div class="item">
             <span>配色</span>
-            <t-radio-group v-model="palette" size="small" variant="default-filled" @change="(v) => c.water.setPalette(v)">
+            <t-radio-group v-model="palette" size="small" variant="default-filled" @change="v => c.water.setPalette(v)">
                 <t-radio-button :value="0">自然</t-radio-button>
                 <t-radio-button :value="1">科技蓝</t-radio-button>
             </t-radio-group>
         </div>
-        <speed-legend />
+        <speed-legend :mode="colorMode" :min="lvMin" :max="lvMax" />
     </div>
 </template>
 
@@ -41,6 +48,9 @@ const particlesOn = ref(true)
 const dim = ref(256)
 const exagg = ref(c.exaggeration)
 const palette = ref(c.palette)
+const colorMode = ref(0)
+const lvMin = c.data.meta.stats.levelMin
+const lvMax = c.data.meta.stats.levelMax
 const dimOpts = [
     { label: '1.6万', value: 128 },
     { label: '6.5万', value: 256 },

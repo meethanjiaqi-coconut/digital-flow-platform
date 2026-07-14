@@ -48,8 +48,8 @@ export class FlowFieldData {
         const totalGuess = 2_100_000 + 31_100_000
         const report = () => onProgress && onProgress(progress[0] + progress[1], totalGuess)
         const [meshBuf, framesBuf] = await Promise.all([
-            fetchWithProgress(baseUrl + 'mesh.bin', (r) => ((progress[0] = r), report())),
-            fetchWithProgress(baseUrl + 'frames.bin', (r) => ((progress[1] = r), report()))
+            fetchWithProgress(baseUrl + 'mesh.bin', r => ((progress[0] = r), report())),
+            fetchWithProgress(baseUrl + 'frames.bin', r => ((progress[1] = r), report()))
         ])
         return new FlowFieldData(meta, meshBuf, framesBuf)
     }
@@ -62,13 +62,20 @@ export class FlowFieldData {
         const nCells = (this.nCells = dv.getUint32(8, true))
         const nTris = (this.nTris = dv.getUint32(12, true))
         let o = 16
-        this.lon = new Float32Array(meshBuf, o, nNodes); o += nNodes * 4
-        this.lat = new Float32Array(meshBuf, o, nNodes); o += nNodes * 4
-        this.zb = new Float32Array(meshBuf, o, nNodes); o += nNodes * 4
-        this.tri = new Uint16Array(meshBuf, o, nTris * 3); o += nTris * 6
-        this.cellNode = new Uint16Array(meshBuf, o, nCells * 4); o += nCells * 8
-        this.cellLon = new Float32Array(meshBuf, o, nCells); o += nCells * 4
-        this.cellLat = new Float32Array(meshBuf, o, nCells); o += nCells * 4
+        this.lon = new Float32Array(meshBuf, o, nNodes)
+        o += nNodes * 4
+        this.lat = new Float32Array(meshBuf, o, nNodes)
+        o += nNodes * 4
+        this.zb = new Float32Array(meshBuf, o, nNodes)
+        o += nNodes * 4
+        this.tri = new Uint16Array(meshBuf, o, nTris * 3)
+        o += nTris * 6
+        this.cellNode = new Uint16Array(meshBuf, o, nCells * 4)
+        o += nCells * 8
+        this.cellLon = new Float32Array(meshBuf, o, nCells)
+        o += nCells * 4
+        this.cellLat = new Float32Array(meshBuf, o, nCells)
+        o += nCells * 4
         if (o !== meshBuf.byteLength) throw new Error(`mesh.bin 长度不符 ${o}/${meshBuf.byteLength}`)
 
         const fdv = new DataView(framesBuf)
@@ -105,15 +112,12 @@ export class FlowFieldData {
         const { nNodes, nCells, cellNode } = this
         const counts = new Uint16Array(nNodes)
         const uniq = (i, k) => !(k === 3 && cellNode[i * 4 + 3] === cellNode[i * 4])
-        for (let i = 0; i < nCells; i++)
-            for (let k = 0; k < 4; k++) if (uniq(i, k)) counts[cellNode[i * 4 + k]]++
+        for (let i = 0; i < nCells; i++) for (let k = 0; k < 4; k++) if (uniq(i, k)) counts[cellNode[i * 4 + k]]++
         const offsets = new Uint32Array(nNodes + 1)
         for (let n = 0; n < nNodes; n++) offsets[n + 1] = offsets[n] + counts[n]
         const adj = new Uint32Array(offsets[nNodes])
         const cursor = Uint32Array.from(offsets.subarray(0, nNodes))
-        for (let i = 0; i < nCells; i++)
-            for (let k = 0; k < 4; k++)
-                if (uniq(i, k)) adj[cursor[cellNode[i * 4 + k]]++] = i
+        for (let i = 0; i < nCells; i++) for (let k = 0; k < 4; k++) if (uniq(i, k)) adj[cursor[cellNode[i * 4 + k]]++] = i
         this._adjOffsets = offsets
         this._adj = adj
     }
@@ -132,8 +136,12 @@ export class FlowFieldData {
         const offsets = this._adjOffsets
         const adj = this._adj
         for (let n = 0; n < nNodes; n++) {
-            let sl = 0, su = 0, sv = 0, wetCnt = 0
-            const s = offsets[n], e = offsets[n + 1]
+            let sl = 0,
+                su = 0,
+                sv = 0,
+                wetCnt = 0
+            const s = offsets[n],
+                e = offsets[n + 1]
             for (let j = s; j < e; j++) {
                 const c = adj[j]
                 const z = frames[base + c]
@@ -152,8 +160,7 @@ export class FlowFieldData {
             }
         }
         this._nodeFrameCache.set(frame, out)
-        if (this._nodeFrameCache.size > 6)
-            this._nodeFrameCache.delete(this._nodeFrameCache.keys().next().value)
+        if (this._nodeFrameCache.size > 6) this._nodeFrameCache.delete(this._nodeFrameCache.keys().next().value)
         return out
     }
 
@@ -163,23 +170,29 @@ export class FlowFieldData {
 
     _buildIndex() {
         const [w, s, e, n] = this.bbox
-        this._ix = (lon) => Math.min(GRID - 1, Math.max(0, Math.floor(((lon - w) / (e - w)) * GRID)))
-        this._iy = (lat) => Math.min(GRID - 1, Math.max(0, Math.floor(((lat - s) / (n - s)) * GRID)))
+        this._ix = lon => Math.min(GRID - 1, Math.max(0, Math.floor(((lon - w) / (e - w)) * GRID)))
+        this._iy = lat => Math.min(GRID - 1, Math.max(0, Math.floor(((lat - s) / (n - s)) * GRID)))
         const bins = (this._bins = new Array(GRID * GRID))
         const { nCells, cellNode, lon, lat } = this
         for (let i = 0; i < nCells; i++) {
-            let x0 = 999, x1 = -999, y0 = 999, y1 = -999
+            let x0 = 999,
+                x1 = -999,
+                y0 = 999,
+                y1 = -999
             const cnt = this._cellUniqCount(i)
             for (let k = 0; k < cnt; k++) {
                 const nd = cellNode[i * 4 + k]
-                const px = lon[nd], py = lat[nd]
+                const px = lon[nd],
+                    py = lat[nd]
                 if (px < x0) x0 = px
                 if (px > x1) x1 = px
                 if (py < y0) y0 = py
                 if (py > y1) y1 = py
             }
-            const gx0 = this._ix(x0), gx1 = this._ix(x1)
-            const gy0 = this._iy(y0), gy1 = this._iy(y1)
+            const gx0 = this._ix(x0),
+                gx1 = this._ix(x1)
+            const gy0 = this._iy(y0),
+                gy1 = this._iy(y1)
             for (let gy = gy0; gy <= gy1; gy++)
                 for (let gx = gx0; gx <= gx1; gx++) {
                     const key = gy * GRID + gx
@@ -193,8 +206,10 @@ export class FlowFieldData {
         const cnt = this._cellUniqCount(i)
         let inside = false
         for (let k = 0, j = cnt - 1; k < cnt; j = k++) {
-            const xa = lon[cellNode[i * 4 + k]], ya = lat[cellNode[i * 4 + k]]
-            const xb = lon[cellNode[i * 4 + j]], yb = lat[cellNode[i * 4 + j]]
+            const xa = lon[cellNode[i * 4 + k]],
+                ya = lat[cellNode[i * 4 + k]]
+            const xb = lon[cellNode[i * 4 + j]],
+                yb = lat[cellNode[i * 4 + j]]
             if (ya > py !== yb > py && px < ((xb - xa) * (py - ya)) / (yb - ya) + xa) inside = !inside
         }
         return inside

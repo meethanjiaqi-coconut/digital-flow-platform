@@ -2,8 +2,9 @@
 /**
  * Windy 风格 GPU 粒子流场层。
  * 每帧四段:①网格→视野流场纹理(r=u,g=v,b=wet,a=level) ②位置纹理 ping-pong 平流
- * ③拖尾纹理衰减+画线段 ④合成到场景(TRANSLUCENT 命令)。
+ * ③拖尾纹理衰减+画粒子条带 ④合成到场景(OVERLAY 命令)。
  * ①②③ 在 update() 内直接 execute(离屏),④ 推入 commandList。
+ * 粒子以屏幕空间四边形条带绘制(可控线宽、软边、头亮尾暗),重生点在湿区内拒绝采样。
  */
 
 const QUAD_VS = `
@@ -49,9 +50,22 @@ void main() {
     bool outside = fuv.x < 0.0 || fuv.x > 1.0 || fuv.y < 0.0 || fuv.y > 1.0;
     float maxAge = 4.0 + fract(seed * 7.31) * 6.0;
     if (outside || age > maxAge || f.b < 0.35) {
-        float r1 = rand(seed + u_frame * 0.0131 + v_st.x);
-        float r2 = rand(seed * 1.71 + u_frame * 0.0177 + v_st.y);
-        lonlat = u_bbox.xy + vec2(r1, r2) * u_bbox.zw;
+        // 湿区拒绝采样:最多试 4 个随机点,取第一个湿点
+        vec2 spawn = lonlat;
+        float got = 0.0;
+        for (int i = 0; i < 4; i++) {
+            float fi = float(i);
+            vec2 cand = u_bbox.xy + vec2(
+                rand(seed + u_frame * 0.0131 + v_st.x + fi * 0.317),
+                rand(seed * 1.71 + u_frame * 0.0177 + v_st.y + fi * 0.731)
+            ) * u_bbox.zw;
+            float wet = texture2D(u_field, (cand - u_bbox.xy) / u_bbox.zw).b;
+            if (got < 0.5) {
+                spawn = cand;
+                if (wet > 0.45) got = 1.0;
+            }
+        }
+        lonlat = spawn;
         age = 0.0;
         seed = fract(seed + 0.61803398875);
     } else {
@@ -73,15 +87,21 @@ void main() {
 }
 `
 
-const SEG_VS = `
+// 粒子条带:每粒子 4 顶点(尾左/尾右/头左/头右),屏幕空间展宽
+const RIBBON_VS = `
 attribute vec2 ref;      // 粒子纹理坐标
 attribute float endFlag; // 0=尾 1=头
+attribute float side;    // -1 / +1
 uniform sampler2D u_curr;
 uniform sampler2D u_prev;
 uniform sampler2D u_field;
 uniform vec4 u_bbox;
 uniform float u_exagg;
+uniform vec2 u_viewport;
+uniform float u_width;   // 头部半宽(像素)
 varying float v_speed;
+varying float v_end;
+varying float v_side;
 const float A = 6378137.0;
 const float E2 = 0.00669437999014;
 vec3 toEcef(vec2 ll, float h) {
@@ -97,19 +117,39 @@ void main() {
     vec2 fuv = (head.xy - u_bbox.xy) / u_bbox.zw;
     vec4 f = texture2D(u_field, fuv);
     v_speed = length(f.rg);
-    // 重生跳变或干区:线段折叠为零长
-    if (distance(head.xy, tail.xy) > u_bbox.z * 0.02 || f.b < 0.35 || head.z < 0.016) tail = head;
-    vec2 ll = endFlag > 0.5 ? head.xy : tail.xy;
+    v_end = endFlag;
+    v_side = side;
+    // 重生跳变/干区/新生:移出屏幕
+    if (distance(head.xy, tail.xy) > u_bbox.z * 0.02 || f.b < 0.35 || head.z < 0.016) {
+        gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+        return;
+    }
     float h = f.a * u_exagg + 12.0;
-    gl_Position = czm_viewProjection * vec4(toEcef(ll, h), 1.0);
+    vec4 clipH = czm_viewProjection * vec4(toEcef(head.xy, h), 1.0);
+    vec4 clipT = czm_viewProjection * vec4(toEcef(tail.xy, h), 1.0);
+    vec2 sH = clipH.xy / max(clipH.w, 1e-6) * u_viewport;
+    vec2 sT = clipT.xy / max(clipT.w, 1e-6) * u_viewport;
+    vec2 dir = sH - sT;
+    float len = length(dir);
+    dir = len > 0.01 ? dir / len : vec2(1.0, 0.0);
+    vec2 nrm = vec2(-dir.y, dir.x);
+    vec4 clip = endFlag > 0.5 ? clipH : clipT;
+    float wpx = u_width * mix(0.5, 1.0, endFlag); // 尾窄头宽
+    clip.xy += nrm * side * (wpx * 2.0 / u_viewport) * clip.w;
+    if (endFlag > 0.5) clip.xy += dir * (wpx * 1.2 / u_viewport) * clip.w; // 圆头外延
+    gl_Position = clip;
 }
 `
-const SEG_FS = `
+const RIBBON_FS = `
 uniform sampler2D u_ramp;
 varying float v_speed;
+varying float v_end;
+varying float v_side;
 void main() {
     vec3 c = texture2D(u_ramp, vec2(clamp(v_speed / 2.5, 0.02, 0.98), 0.5)).rgb;
-    gl_FragColor = vec4(c, 1.0);
+    float edge = 1.0 - abs(v_side);
+    float a = smoothstep(0.0, 0.55, edge) * mix(0.4, 1.0, v_end);
+    gl_FragColor = vec4(c * a, a);
 }
 `
 
@@ -161,6 +201,7 @@ export class ParticleFlowLayer {
         this._fieldH = 1024
         this._fade = 0.965
         this._opacity = 1.0
+        this._width = 2.4 // 条带头部半宽(像素)
         this._pendingA = null
         this._pendingB = null
         this._bbox = null // [xmin,ymin,xspan,yspan]
@@ -184,6 +225,9 @@ export class ParticleFlowLayer {
         this._dim = dim
         this._rebuildParticles = true
     }
+    setWidth(px) {
+        this._width = px
+    }
 
     // ---------------------------------------------------------- resources
     _createStatic(context) {
@@ -199,7 +243,10 @@ export class ParticleFlowLayer {
         this._dataABuf = S.Buffer.createVertexBuffer({ context, typedArray: new Float32Array(n * 4), usage: S.BufferUsage.DYNAMIC_DRAW })
         this._dataBBuf = S.Buffer.createVertexBuffer({ context, typedArray: new Float32Array(n * 4), usage: S.BufferUsage.DYNAMIC_DRAW })
         this._meshIndexBuf = S.Buffer.createIndexBuffer({
-            context, typedArray: data.tri, usage: S.BufferUsage.STATIC_DRAW, indexDatatype: S.IndexDatatype.UNSIGNED_SHORT
+            context,
+            typedArray: data.tri,
+            usage: S.BufferUsage.STATIC_DRAW,
+            indexDatatype: S.IndexDatatype.UNSIGNED_SHORT
         })
         this._fieldVA = new S.VertexArray({
             context,
@@ -211,7 +258,9 @@ export class ParticleFlowLayer {
             ]
         })
         this._fieldSP = S.ShaderProgram.fromCache({
-            context, vertexShaderSource: FIELD_VS, fragmentShaderSource: FIELD_FS,
+            context,
+            vertexShaderSource: FIELD_VS,
+            fragmentShaderSource: FIELD_FS,
             attributeLocations: { lonlat: 0, dataA: 1, dataB: 2 }
         })
 
@@ -222,25 +271,41 @@ export class ParticleFlowLayer {
             attributes: [{ index: 0, vertexBuffer: this._quadBuf, componentsPerAttribute: 2, componentDatatype: S.ComponentDatatype.FLOAT }]
         })
         this._updateSP = S.ShaderProgram.fromCache({
-            context, vertexShaderSource: QUAD_VS, fragmentShaderSource: UPDATE_FS, attributeLocations: { position: 0 }
+            context,
+            vertexShaderSource: QUAD_VS,
+            fragmentShaderSource: UPDATE_FS,
+            attributeLocations: { position: 0 }
         })
         this._fadeSP = S.ShaderProgram.fromCache({
-            context, vertexShaderSource: QUAD_VS, fragmentShaderSource: FADE_FS, attributeLocations: { position: 0 }
+            context,
+            vertexShaderSource: QUAD_VS,
+            fragmentShaderSource: FADE_FS,
+            attributeLocations: { position: 0 }
         })
-        this._segSP = S.ShaderProgram.fromCache({
-            context, vertexShaderSource: SEG_VS, fragmentShaderSource: SEG_FS, attributeLocations: { ref: 0, endFlag: 1 }
+        this._ribbonSP = S.ShaderProgram.fromCache({
+            context,
+            vertexShaderSource: RIBBON_VS,
+            fragmentShaderSource: RIBBON_FS,
+            attributeLocations: { ref: 0, endFlag: 1, side: 2 }
         })
         this._compositeSP = S.ShaderProgram.fromCache({
-            context, vertexShaderSource: QUAD_VS, fragmentShaderSource: COMPOSITE_FS, attributeLocations: { position: 0 }
+            context,
+            vertexShaderSource: QUAD_VS,
+            fragmentShaderSource: COMPOSITE_FS,
+            attributeLocations: { position: 0 }
         })
         this._rampTex = new S.Texture({
-            context, source: rampCanvas(),
+            context,
+            source: rampCanvas(),
             sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2601, magnificationFilter: 0x2601 })
         })
         // NEAREST:避免依赖 OES_texture_float_linear(缺失时 LINEAR 采样浮点纹理恒返回 0)
         this._fieldTex = new S.Texture({
-            context, width: this._fieldW, height: this._fieldH,
-            pixelFormat: S.PixelFormat.RGBA, pixelDatatype: S.PixelDatatype.FLOAT,
+            context,
+            width: this._fieldW,
+            height: this._fieldH,
+            pixelFormat: S.PixelFormat.RGBA,
+            pixelDatatype: S.PixelDatatype.FLOAT,
             sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2600, magnificationFilter: 0x2600 })
         })
         this._fieldFB = new S.Framebuffer({ context, colorTextures: [this._fieldTex], destroyAttachments: false })
@@ -258,10 +323,13 @@ export class ParticleFlowLayer {
             init[i * 4 + 2] = Math.random() * 8 // age 错峰
             init[i * 4 + 3] = Math.random()
         }
-        const mkTex = (src) =>
+        const mkTex = src =>
             new S.Texture({
-                context, width: dim, height: dim,
-                pixelFormat: S.PixelFormat.RGBA, pixelDatatype: S.PixelDatatype.FLOAT,
+                context,
+                width: dim,
+                height: dim,
+                pixelFormat: S.PixelFormat.RGBA,
+                pixelDatatype: S.PixelDatatype.FLOAT,
                 source: src ? { width: dim, height: dim, arrayBufferView: src } : undefined,
                 sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2600, magnificationFilter: 0x2600 })
             })
@@ -271,26 +339,53 @@ export class ParticleFlowLayer {
         this._posFBB = new S.Framebuffer({ context, colorTextures: [this._posTexB], destroyAttachments: false })
         this._pingIsA = true
 
-        // 线段 VB:每粒子 2 顶点 (ref.x, ref.y, endFlag)
-        const seg = new Float32Array(n * 2 * 3)
+        // 条带 VB:每粒子 4 顶点 [ref.x, ref.y, endFlag, side],索引 6/粒子
+        const vb = new Float32Array(n * 4 * 4)
+        const ib = new Uint32Array(n * 6)
         let o = 0
-        for (let y = 0; y < dim; y++) {
-            for (let x = 0; x < dim; x++) {
-                const sx = (x + 0.5) / dim
-                const sy = (y + 0.5) / dim
-                seg[o++] = sx; seg[o++] = sy; seg[o++] = 0
-                seg[o++] = sx; seg[o++] = sy; seg[o++] = 1
+        let q = 0
+        const corners = [
+            [0, -1],
+            [0, 1],
+            [1, -1],
+            [1, 1]
+        ]
+        for (let i = 0; i < n; i++) {
+            const x = i % dim
+            const y = (i / dim) | 0
+            const sx = (x + 0.5) / dim
+            const sy = (y + 0.5) / dim
+            for (const [ef, sd] of corners) {
+                vb[o++] = sx
+                vb[o++] = sy
+                vb[o++] = ef
+                vb[o++] = sd
             }
+            const b = i * 4
+            ib[q++] = b
+            ib[q++] = b + 1
+            ib[q++] = b + 2
+            ib[q++] = b + 2
+            ib[q++] = b + 1
+            ib[q++] = b + 3
         }
-        this._segBuf = S.Buffer.createVertexBuffer({ context, typedArray: seg, usage: S.BufferUsage.STATIC_DRAW })
-        this._segVA = new S.VertexArray({
+        this._ribbonBuf = S.Buffer.createVertexBuffer({ context, typedArray: vb, usage: S.BufferUsage.STATIC_DRAW })
+        this._ribbonIdx = S.Buffer.createIndexBuffer({
             context,
+            typedArray: ib,
+            usage: S.BufferUsage.STATIC_DRAW,
+            indexDatatype: S.IndexDatatype.UNSIGNED_INT
+        })
+        this._ribbonVA = new S.VertexArray({
+            context,
+            indexBuffer: this._ribbonIdx,
             attributes: [
-                { index: 0, vertexBuffer: this._segBuf, componentsPerAttribute: 2, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 12, offsetInBytes: 0 },
-                { index: 1, vertexBuffer: this._segBuf, componentsPerAttribute: 1, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 12, offsetInBytes: 8 }
+                { index: 0, vertexBuffer: this._ribbonBuf, componentsPerAttribute: 2, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 16, offsetInBytes: 0 },
+                { index: 1, vertexBuffer: this._ribbonBuf, componentsPerAttribute: 1, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 16, offsetInBytes: 8 },
+                { index: 2, vertexBuffer: this._ribbonBuf, componentsPerAttribute: 1, componentDatatype: S.ComponentDatatype.FLOAT, strideInBytes: 16, offsetInBytes: 12 }
             ]
         })
-        this._nSegVerts = n * 2
+        this._nRibbonIndices = n * 6
     }
 
     _createTrails(context) {
@@ -299,8 +394,11 @@ export class ParticleFlowLayer {
         const h = (this._trailH = context.drawingBufferHeight)
         const mk = () => {
             const tex = new S.Texture({
-                context, width: w, height: h,
-                pixelFormat: S.PixelFormat.RGBA, pixelDatatype: S.PixelDatatype.UNSIGNED_BYTE,
+                context,
+                width: w,
+                height: h,
+                pixelFormat: S.PixelFormat.RGBA,
+                pixelDatatype: S.PixelDatatype.UNSIGNED_BYTE,
                 sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2601, magnificationFilter: 0x2601 })
             })
             return { tex, fb: new S.Framebuffer({ context, colorTextures: [tex], destroyAttachments: false }) }
@@ -325,11 +423,21 @@ export class ParticleFlowLayer {
             const rn = S.Math.toDegrees(rect.north)
             const px = (re - rw) * pad
             const py = (rn - rs) * pad
-            w = Math.max(dw, rw - px); e = Math.min(de, re + px)
-            s = Math.max(ds, rs - py); n = Math.min(dn, rn + py)
-            if (!(e > w) || !(n > s)) { w = dw; s = ds; e = de; n = dn }
+            w = Math.max(dw, rw - px)
+            e = Math.min(de, re + px)
+            s = Math.max(ds, rs - py)
+            n = Math.min(dn, rn + py)
+            if (!(e > w) || !(n > s)) {
+                w = dw
+                s = ds
+                e = de
+                n = dn
+            }
         } else {
-            w = dw; s = ds; e = de; n = dn
+            w = dw
+            s = ds
+            e = de
+            n = dn
         }
         return [w, s, e - w, n - s]
     }
@@ -371,8 +479,9 @@ export class ParticleFlowLayer {
             const floatRenderable = isWebGL2
                 ? !!gl.getExtension('EXT_color_buffer_float')
                 : !!gl.getExtension('OES_texture_float') && !!gl.getExtension('WEBGL_color_buffer_float')
-            if (!floatRenderable) {
-                console.warn('[ParticleFlowLayer] GPU 不支持浮点颜色缓冲(EXT_color_buffer_float),粒子层禁用。isWebGL2=', isWebGL2)
+            const uintIndex = isWebGL2 || !!gl.getExtension('OES_element_index_uint')
+            if (!floatRenderable || !uintIndex) {
+                console.warn('[ParticleFlowLayer] GPU 能力不足(float 渲染或 uint 索引缺失),粒子层禁用。isWebGL2=', isWebGL2, 'floatRenderable=', floatRenderable, 'uintIndex=', uintIndex)
                 this.show = false
                 return
             }
@@ -398,8 +507,10 @@ export class ParticleFlowLayer {
         const nb = this._viewBbox()
         const ob = this._bbox
         const moved =
-            Math.abs(nb[0] - ob[0]) > ob[2] * 0.02 || Math.abs(nb[1] - ob[1]) > ob[3] * 0.02 ||
-            Math.abs(nb[2] - ob[2]) > ob[2] * 0.02 || Math.abs(nb[3] - ob[3]) > ob[3] * 0.02
+            Math.abs(nb[0] - ob[0]) > ob[2] * 0.02 ||
+            Math.abs(nb[1] - ob[1]) > ob[3] * 0.02 ||
+            Math.abs(nb[2] - ob[2]) > ob[2] * 0.02 ||
+            Math.abs(nb[3] - ob[3]) > ob[3] * 0.02
         if (moved) {
             this._bbox = nb
             this._clearTrails = true
@@ -423,69 +534,71 @@ export class ParticleFlowLayer {
         const speedScale = bboxArr[2] * 0.045 // 1 m/s 每秒横跨视野约 4.5%
 
         try {
-        // ① 流场纹理
-        new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: this._fieldFB }).execute(context)
-        this._drawOffscreen(context, {
-            sp: this._fieldSP,
-            va: this._fieldVA,
-            fb: this._fieldFB,
-            rs: this._mkOffscreenRS(this._fieldW, this._fieldH),
-            uniformMap: { u_t: () => this._t, u_bbox: bboxUniform }
-        })
+            // ① 流场纹理
+            new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: this._fieldFB }).execute(context)
+            this._drawOffscreen(context, {
+                sp: this._fieldSP,
+                va: this._fieldVA,
+                fb: this._fieldFB,
+                rs: this._mkOffscreenRS(this._fieldW, this._fieldH),
+                uniformMap: { u_t: () => this._t, u_bbox: bboxUniform }
+            })
 
-        // ② 粒子更新:prev -> curr
-        const prevTex = this._pingIsA ? this._posTexA : this._posTexB
-        const currFB = this._pingIsA ? this._posFBB : this._posFBA
-        const currTex = this._pingIsA ? this._posTexB : this._posTexA
-        this._drawOffscreen(context, {
-            sp: this._updateSP,
-            va: this._quadVA,
-            fb: currFB,
-            rs: this._mkOffscreenRS(this._dim, this._dim),
-            uniformMap: {
-                u_particles: () => prevTex,
-                u_field: () => this._fieldTex,
-                u_bbox: bboxUniform,
-                u_dt: () => dt,
-                u_speedScale: () => speedScale,
-                u_frame: () => this._frame % 1000
-            }
-        })
-        this._pingIsA = !this._pingIsA
+            // ② 粒子更新:prev -> curr
+            const prevTex = this._pingIsA ? this._posTexA : this._posTexB
+            const currFB = this._pingIsA ? this._posFBB : this._posFBA
+            const currTex = this._pingIsA ? this._posTexB : this._posTexA
+            this._drawOffscreen(context, {
+                sp: this._updateSP,
+                va: this._quadVA,
+                fb: currFB,
+                rs: this._mkOffscreenRS(this._dim, this._dim),
+                uniformMap: {
+                    u_particles: () => prevTex,
+                    u_field: () => this._fieldTex,
+                    u_bbox: bboxUniform,
+                    u_dt: () => dt,
+                    u_speedScale: () => speedScale,
+                    u_frame: () => this._frame % 1000
+                }
+            })
+            this._pingIsA = !this._pingIsA
 
-        // ③ 拖尾:prevTrail 衰减写入 currTrail,再叠加线段
-        const trailPrev = this._trailPingIsA ? this._trailA : this._trailB
-        const trailCurr = this._trailPingIsA ? this._trailB : this._trailA
-        if (this._clearTrails) {
-            this._clearTrails = false
-            for (const t of [this._trailA, this._trailB]) {
-                new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: t.fb }).execute(context)
+            // ③ 拖尾:prevTrail 衰减写入 currTrail,再叠加条带
+            const trailPrev = this._trailPingIsA ? this._trailA : this._trailB
+            const trailCurr = this._trailPingIsA ? this._trailB : this._trailA
+            if (this._clearTrails) {
+                this._clearTrails = false
+                for (const t of [this._trailA, this._trailB]) {
+                    new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: t.fb }).execute(context)
+                }
             }
-        }
-        this._drawOffscreen(context, {
-            sp: this._fadeSP,
-            va: this._quadVA,
-            fb: trailCurr.fb,
-            rs: this._mkOffscreenRS(this._trailW, this._trailH),
-            uniformMap: { u_trail: () => trailPrev.tex, u_fade: () => this._fade }
-        })
-        this._drawOffscreen(context, {
-            sp: this._segSP,
-            va: this._segVA,
-            fb: trailCurr.fb,
-            rs: this._mkOffscreenRS(this._trailW, this._trailH, ADD_BLEND),
-            count: this._nSegVerts,
-            primitiveType: S.PrimitiveType.LINES,
-            uniformMap: {
-                u_curr: () => currTex,
-                u_prev: () => prevTex,
-                u_field: () => this._fieldTex,
-                u_bbox: bboxUniform,
-                u_exagg: () => this._exagg,
-                u_ramp: () => this._rampTex
-            }
-        })
-        this._trailPingIsA = !this._trailPingIsA
+            this._drawOffscreen(context, {
+                sp: this._fadeSP,
+                va: this._quadVA,
+                fb: trailCurr.fb,
+                rs: this._mkOffscreenRS(this._trailW, this._trailH),
+                uniformMap: { u_trail: () => trailPrev.tex, u_fade: () => this._fade }
+            })
+            this._drawOffscreen(context, {
+                sp: this._ribbonSP,
+                va: this._ribbonVA,
+                fb: trailCurr.fb,
+                rs: this._mkOffscreenRS(this._trailW, this._trailH, ADD_BLEND),
+                count: this._nRibbonIndices,
+                primitiveType: S.PrimitiveType.TRIANGLES,
+                uniformMap: {
+                    u_curr: () => currTex,
+                    u_prev: () => prevTex,
+                    u_field: () => this._fieldTex,
+                    u_bbox: bboxUniform,
+                    u_exagg: () => this._exagg,
+                    u_viewport: () => new S.Cartesian2(this._trailW, this._trailH),
+                    u_width: () => this._width,
+                    u_ramp: () => this._rampTex
+                }
+            })
+            this._trailPingIsA = !this._trailPingIsA
         } catch (e) {
             if (!this._runError) {
                 this._runError = true
@@ -519,7 +632,7 @@ export class ParticleFlowLayer {
 
     // ---------------------------------------------------------- teardown
     _destroyParticles() {
-        for (const k of ['_posFBA', '_posFBB', '_posTexA', '_posTexB', '_segVA', '_segBuf']) {
+        for (const k of ['_posFBA', '_posFBB', '_posTexA', '_posTexB', '_ribbonVA', '_ribbonBuf', '_ribbonIdx']) {
             if (this[k] && this[k].destroy && !(this[k].isDestroyed && this[k].isDestroyed())) this[k].destroy()
             this[k] = undefined
         }

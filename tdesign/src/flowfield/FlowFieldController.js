@@ -55,7 +55,7 @@ export class FlowFieldController {
         const f0 = Math.min(this.data.nFrames - 1, Math.floor(this.simHour))
         const d = new Date(Date.parse(this.data.meta.times[f0]))
         d.setMinutes(d.getMinutes() + Math.round((this.simHour - f0) * 60))
-        const p = (x) => String(x).padStart(2, '0')
+        const p = x => String(x).padStart(2, '0')
         return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
     }
 
