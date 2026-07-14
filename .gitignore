@@ -1,0 +1,4 @@
+node_modules/
+dist/
+*.DAT
+tdesign/public/data/flowfield/*.bin
