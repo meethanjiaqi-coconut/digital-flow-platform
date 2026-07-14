@@ -431,30 +431,52 @@ export class ParticleFlowLayer {
     }
 
     // ---------------------------------------------------------- helpers
+    /**
+     * 粒子域:以相机视线与椭球交点为中心、按视距自适应跨度。
+     * 不用 computeViewRectangle——视角贴近水面时它会包含地平线(跨度爆炸/undefined),
+     * 导致粒子被稀释到全域而"消失"。
+     */
     _viewBbox() {
         const S = SuperMap3D
-        const rect = this.viewer.camera.computeViewRectangle(S.Ellipsoid.WGS84)
+        const camera = this.viewer.camera
         const [dw, ds, de, dn] = this.data.bbox
-        let w, s, e, n
-        if (rect) {
-            const pad = 0.15
-            const rw = S.Math.toDegrees(rect.west)
-            const re = S.Math.toDegrees(rect.east)
-            const rs = S.Math.toDegrees(rect.south)
-            const rn = S.Math.toDegrees(rect.north)
-            const px = (re - rw) * pad
-            const py = (rn - rs) * pad
-            w = Math.max(dw, rw - px)
-            e = Math.min(de, re + px)
-            s = Math.max(ds, rs - py)
-            n = Math.min(dn, rn + py)
-            if (!(e > w) || !(n > s)) {
-                w = dw
-                s = ds
-                e = de
-                n = dn
+        const ellipsoid = S.Ellipsoid.WGS84
+        let centerLon, centerLat, distM
+        let picked = false
+        if (S.IntersectionTests && S.IntersectionTests.rayEllipsoid && S.Ray) {
+            const ray = new S.Ray(camera.position, camera.direction)
+            const iv = S.IntersectionTests.rayEllipsoid(ray, ellipsoid)
+            if (iv) {
+                const p = S.Ray.getPoint(ray, iv.start)
+                const c = S.Cartographic.fromCartesian(p)
+                centerLon = S.Math.toDegrees(c.longitude)
+                centerLat = S.Math.toDegrees(c.latitude)
+                distM = Math.max(iv.start, 200)
+                picked = true
             }
-        } else {
+        }
+        if (!picked) {
+            const c = camera.positionCartographic
+            centerLon = S.Math.toDegrees(c.longitude)
+            centerLat = S.Math.toDegrees(c.latitude)
+            distM = Math.max(c.height, 1000)
+        }
+        const spanM = Math.max(distM * 2.6, 2000) // 视距 ~2.6 倍,下限 2km
+        const coslat = Math.max(Math.cos((centerLat * Math.PI) / 180), 0.2)
+        const spanLat = Math.min(spanM / 110540, dn - ds)
+        const spanLon = Math.min(spanM / (111320 * coslat), de - dw)
+        let w = centerLon - spanLon / 2
+        let e = centerLon + spanLon / 2
+        let s = centerLat - spanLat / 2
+        let n = centerLat + spanLat / 2
+        // 平移回域内再钳制
+        if (w < dw) { e += dw - w; w = dw }
+        if (e > de) { w -= e - de; e = de }
+        if (s < ds) { n += ds - s; s = ds }
+        if (n > dn) { s -= n - dn; n = dn }
+        w = Math.max(w, dw)
+        s = Math.max(s, ds)
+        if (!(e > w) || !(n > s)) {
             w = dw
             s = ds
             e = de
@@ -535,10 +557,10 @@ export class ParticleFlowLayer {
         const nb = this._viewBbox()
         const ob = this._bbox
         const moved =
-            Math.abs(nb[0] - ob[0]) > ob[2] * 0.02 ||
-            Math.abs(nb[1] - ob[1]) > ob[3] * 0.02 ||
-            Math.abs(nb[2] - ob[2]) > ob[2] * 0.02 ||
-            Math.abs(nb[3] - ob[3]) > ob[3] * 0.02
+            Math.abs(nb[0] - ob[0]) > ob[2] * 0.08 ||
+            Math.abs(nb[1] - ob[1]) > ob[3] * 0.08 ||
+            Math.abs(nb[2] - ob[2]) > ob[2] * 0.08 ||
+            Math.abs(nb[3] - ob[3]) > ob[3] * 0.08
         if (moved) {
             this._bbox = nb
             this._clearTrails = true
