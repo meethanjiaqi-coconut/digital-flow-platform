@@ -237,10 +237,11 @@ export class ParticleFlowLayer {
             context, source: rampCanvas(),
             sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2601, magnificationFilter: 0x2601 })
         })
+        // NEAREST:避免依赖 OES_texture_float_linear(缺失时 LINEAR 采样浮点纹理恒返回 0)
         this._fieldTex = new S.Texture({
             context, width: this._fieldW, height: this._fieldH,
             pixelFormat: S.PixelFormat.RGBA, pixelDatatype: S.PixelDatatype.FLOAT,
-            sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2601, magnificationFilter: 0x2601 })
+            sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2600, magnificationFilter: 0x2600 })
         })
         this._fieldFB = new S.Framebuffer({ context, colorTextures: [this._fieldTex], destroyAttachments: false })
     }
@@ -365,16 +366,28 @@ export class ParticleFlowLayer {
         const S = SuperMap3D
         const context = frameState.context
         if (!this._ready) {
-            if (!context.floatingPointTexture && !context.webgl2) {
-                console.warn('[ParticleFlowLayer] 不支持浮点纹理,粒子层禁用')
+            const gl = context._gl
+            const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext
+            const floatRenderable = isWebGL2
+                ? !!gl.getExtension('EXT_color_buffer_float')
+                : !!gl.getExtension('OES_texture_float') && !!gl.getExtension('WEBGL_color_buffer_float')
+            if (!floatRenderable) {
+                console.warn('[ParticleFlowLayer] GPU 不支持浮点颜色缓冲(EXT_color_buffer_float),粒子层禁用。isWebGL2=', isWebGL2)
                 this.show = false
                 return
             }
-            this._createStatic(context)
-            this._bbox = this._viewBbox()
-            this._createParticles(context)
-            this._createTrails(context)
-            this._ready = true
+            try {
+                this._createStatic(context)
+                this._bbox = this._viewBbox()
+                this._createParticles(context)
+                this._createTrails(context)
+                this._ready = true
+                console.info('[ParticleFlowLayer] 初始化完成 isWebGL2=', isWebGL2, 'dim=', this._dim)
+            } catch (e) {
+                console.error('[ParticleFlowLayer] 初始化失败,粒子层禁用:', e)
+                this.show = false
+                return
+            }
         }
         if (this._pendingA) {
             this._dataABuf.copyFromArrayView(this._pendingA)
@@ -409,6 +422,7 @@ export class ParticleFlowLayer {
         const bboxUniform = () => new S.Cartesian4(bboxArr[0], bboxArr[1], bboxArr[2], bboxArr[3])
         const speedScale = bboxArr[2] * 0.045 // 1 m/s 每秒横跨视野约 4.5%
 
+        try {
         // ① 流场纹理
         new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: this._fieldFB }).execute(context)
         this._drawOffscreen(context, {
@@ -472,8 +486,16 @@ export class ParticleFlowLayer {
             }
         })
         this._trailPingIsA = !this._trailPingIsA
+        } catch (e) {
+            if (!this._runError) {
+                this._runError = true
+                console.error('[ParticleFlowLayer] 离屏渲染失败,粒子层禁用:', e)
+            }
+            this.show = false
+            return
+        }
 
-        // ④ 合成
+        // ④ 合成:OVERLAY pass 在场景之后直接叠加,避开 OIT/多视锥
         if (!this._compositeCmd) {
             this._compositeCmd = new S.DrawCommand({
                 owner: this,
@@ -482,14 +504,14 @@ export class ParticleFlowLayer {
                 renderState: S.RenderState.fromCache({
                     depthTest: { enabled: false },
                     depthMask: false,
+                    cull: { enabled: false },
                     blending: ADD_BLEND
                 }),
                 uniformMap: {
                     u_trail: () => (this._trailPingIsA ? this._trailA : this._trailB).tex,
                     u_opacity: () => this._opacity
                 },
-                pass: S.Pass.TRANSLUCENT,
-                boundingVolume: new S.BoundingSphere(S.Cartesian3.ZERO, 1e9)
+                pass: S.Pass.OVERLAY
             })
         }
         frameState.commandList.push(this._compositeCmd)
