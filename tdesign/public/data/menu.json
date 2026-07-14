@@ -1,0 +1,38 @@
+[
+  {
+    "id": "e3a35d6e-6613-4070-be5c-13997e84ea84",
+    "name": "index",
+    "text": "首页",
+    "type": "route",
+    "url": "/"
+  },
+  {
+    "id": "e4b67e7b-84e6-4c65-bc37-5bd0a5268868",
+    "name": "test",
+    "text": "测试",
+    "type": "route",
+    "url": "/test"
+  },
+  {
+    "id": "bd2bbec3-6dd1-46e5-a439-5d02c23d09a4",
+    "name": "developer-center",
+    "text": "开发者中心",
+    "type": "route",
+    "children": [
+      {
+        "id": "62be5bc3-4464-4d85-82b4-0301764402a1",
+        "name": "webgl-examples",
+        "text": "webgl开发示例",
+        "type": "location",
+        "url": "http://support.supermap.com.cn:8090/webgl/examples/webgl/examples.html"
+      },
+      {
+        "id": "00bbee97-67e7-4f80-9a4b-9f10670d5ae6",
+        "name": "webgl-api",
+        "text": "webgl API",
+        "type": "location_blank",
+        "url": "http://support.supermap.com.cn:8090/webgl/docs/Documentation/index.html"
+      }
+    ]
+  }
+]
