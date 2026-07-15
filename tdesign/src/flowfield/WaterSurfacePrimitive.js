@@ -111,7 +111,7 @@ void main() {
     vec3 normalEC = normalize(T * nTS.x + B * nTS.y + N * nTS.z);
     vec3 viewDir = normalize(-v_posEC);
     float fresnel = pow(1.0 - max(dot(viewDir, normalEC), 0.0), 3.0);
-    fresnel = mix(0.06, 0.9, fresnel);
+    fresnel = mix(0.04, 0.55, fresnel);
     float sn = clamp(spd / u_speedMax, 0.0, 1.0);
     vec3 waterColor;
     if (u_colorMode > 0.5) {
@@ -136,11 +136,11 @@ void main() {
         vec3 shallowCol = mix(vec3(0.24, 0.43, 0.36), vec3(0.1, 0.48, 0.52), u_palette);
         waterColor = mix(shallowCol, waterColor * 0.88, smoothstep(0.0, 12.0, v_depth));
     }
-    vec3 sky = mix(vec3(0.5, 0.66, 0.82), vec3(0.1, 0.3, 0.55), u_palette);
+    vec3 sky = mix(vec3(0.34, 0.48, 0.63), vec3(0.08, 0.24, 0.45), u_palette);
     vec3 L = normalize(czm_sunDirectionEC);
     vec3 H = normalize(L + viewDir);
     float ndh = max(dot(normalEC, H), 0.0);
-    float spec = (pow(ndh, 240.0) * 1.4 + pow(ndh, 36.0) * 0.12) * mix(0.3, 1.0, normFade);
+    float spec = (pow(ndh, 240.0) * 0.9 + pow(ndh, 36.0) * 0.08) * mix(0.25, 1.0, normFade);
     // 云图模式弱化反射与高光,保证色彩可读
     float skyMix = fresnel * (u_colorMode > 0.5 ? 0.3 : 1.0);
     float specMix = u_colorMode > 0.5 ? 0.35 : 1.0;
@@ -149,8 +149,8 @@ void main() {
     float noise = texture2D(u_normalMap, v_uv * 2.3 + flowDir * phase0 * 0.25).a;
     float foamBand = smoothstep(0.22, 0.42, v_wet) * (1.0 - smoothstep(0.42, 0.8, v_wet));
     float foam = foamBand * smoothstep(0.35, 0.7, noise) * 1.1
-               + smoothstep(1.6, 2.4, spd) * smoothstep(0.45, 0.85, noise) * 0.7
-               + smoothstep(0.55, 0.95, v_crest) * smoothstep(0.9, 1.8, spd) * smoothstep(0.3, 0.7, noise) * 0.8;
+               + smoothstep(2.2, 3.2, spd) * smoothstep(0.45, 0.85, noise) * 0.5
+               + smoothstep(0.6, 0.95, v_crest) * smoothstep(1.2, 2.2, spd) * smoothstep(0.4, 0.75, noise) * 0.6;
     color = mix(color, vec3(0.93, 0.97, 1.0), clamp(foam, 0.0, 0.85));
     float alpha = u_colorMode > 0.5
         ? 0.82 + sn * 0.05
