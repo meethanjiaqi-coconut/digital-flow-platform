@@ -7,7 +7,7 @@ import {Worker} from 'node:worker_threads'
 import {gzipSync} from 'node:zlib'
 
 function fixture() {
-  const m={scenarioId:'fixture',nNodes:4,nCells:2,nTris:2,nFrames:3,bbox:[100,0,140,40],scales:{level:.01,uv:.001},drySentinel:-32768,mesh:{meshId:'test',file:'mesh.bin.gz'},frames:[0,5,15].map((minute,index)=>({index,validTime:`2026-10-25T00:${String(minute).padStart(2,'0')}:00+08:00`,file:`frames/${index}.bin.gz`}))}
+  const m={formatVersion:2,scenarioId:'fixture',nNodes:4,nCells:2,nTris:2,nFrames:3,bbox:[100,0,140,40],scales:{level:.01,uv:.001},drySentinel:-32768,mesh:{meshId:'test',file:'mesh.bin.gz'},frames:[0,5,15].map((minute,index)=>({index,validTime:`2026-10-25T00:${String(minute).padStart(2,'0')}:00+08:00`,file:`frames/${index}.bin.gz`}))}
   const mesh=new ArrayBuffer(108), head=new DataView(mesh)
   ;[0x46464d31,4,2,2].forEach((v,i)=>head.setUint32(i*4,v,true))
   new Float32Array(mesh,16,12).set([120,120.1,120.1,120,30,30,30.1,30.1,-5,-5,-5,-5])

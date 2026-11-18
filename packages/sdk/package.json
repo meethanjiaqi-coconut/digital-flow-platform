@@ -1,6 +1,6 @@
 {
   "name": "@digital-flow/sdk",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "Framework-independent flow field playback and SuperMap3D renderer",
   "type": "module",
   "license": "UNLICENSED",

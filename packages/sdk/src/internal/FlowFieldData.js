@@ -1,7 +1,11 @@
+import { FlowError, toFlowError } from '../errors.js'
 import { validateManifest } from '../validation.js'
-/* global fetch, AbortController, Worker, URL */
+import { normalizeSeriesResult } from './normalize.js'
+import { aggregateSync, buildAdjacency, buildSpatialIndex, decodeMesh, pickCell } from './meshIndex.js'
 import { resolveTidalFrontAoi, resolveTidalFrontPolygon } from './tidal-front-analysis.js'
-import { TidalEvolution } from './tidalEvolution.js'
+import { TidalHistory } from './tidalHistory.js'
+import { tidalGeometry } from './tidalEvolution.js'
+/* global fetch, AbortController, Worker, URL */
 
 /**
  * 风暴潮流场数据层。
@@ -10,24 +14,54 @@ import { TidalEvolution } from './tidalEvolution.js'
  * AbortController 管理。服务端响应虽然在磁盘上是 gzip，浏览器会按
  * Content-Encoding 自动解压，因此这里拿到的 ArrayBuffer 仍是原始二进制布局。
  */
-const MESH_MAGIC = 0x46464d31
 const FRAME_MAGIC = 0x46464631
-const GRID = 512
 const RAW_CACHE_LIMIT = 12
 const NODE_CACHE_LIMIT = 6
-const TIDAL_FRONT_CACHE_LIMIT = 4
+const abortedError = () => new DOMException('Operation superseded or destroyed', 'AbortError')
+
+function decodeCell(data, values, cell) {
+    if (!values) return null
+    const levelRaw = values[cell]
+    if (levelRaw === data.dry) return { level: null, u: null, v: null, wet: false }
+    return {
+        level: levelRaw * data.levelScale,
+        u: values[data.nCells + cell] * data.uvScale,
+        v: values[2 * data.nCells + cell] * data.uvScale,
+        wet: true
+    }
+}
+
+/** 复用旧场次网格：meshId 相同且字节长度与清单计数一致时返回其 ArrayBuffer。 */
+function reusableMesh(reuse, manifest) {
+    if (!reuse || reuse.meshId !== manifest?.mesh?.meshId || !(reuse._meshBuffer instanceof ArrayBuffer)) return undefined
+    const expected = 16 + manifest.nNodes * 12 + manifest.nTris * 6 + manifest.nCells * 16
+    return reuse._meshBuffer.byteLength === expected ? reuse._meshBuffer : undefined
+}
 
 export class FlowFieldData {
     static async load(provider, manifest, options = {}) {
-        validateManifest(manifest)
-        const mesh = await provider.getMesh(manifest, { signal: options.signal })
-        options.signal?.throwIfAborted()
-        const data = new FlowFieldData(manifest, mesh, provider, options)
         try {
-            await Promise.all([data.frame(0, options), data.frame(Math.min(1, data.nFrames - 1), options)])
+            validateManifest(manifest)
+            options.onProgress?.({ phase: 'mesh', loaded: 0, total: 1 })
+            const mesh = reusableMesh(options.reuse, manifest) ?? await provider.getMesh(manifest, { signal: options.signal })
+            options.onProgress?.({ phase: 'mesh', loaded: 1, total: 1 })
             options.signal?.throwIfAborted()
-            return data
-        } catch (error) { data.destroy(); throw error }
+            const data = new FlowFieldData(manifest, mesh, provider, options)
+            try {
+                data._evaluateTidalBudget()
+                let loaded = 0
+                const track = promise => promise.then(value => {
+                    loaded++
+                    options.onProgress?.({ phase: 'frames', loaded, total: 2 })
+                    return value
+                })
+                await Promise.all([track(data.frame(0, options)), track(data.frame(Math.min(1, data.nFrames - 1), options))])
+                options.signal?.throwIfAborted()
+                return data
+            } catch (error) { data.destroy(); throw error }
+        } catch (error) {
+            throw toFlowError(error, 'scenario.load', 'INVALID_BINARY')
+        }
     }
 
     /**
@@ -84,57 +118,23 @@ export class FlowFieldData {
         this._pendingFrames = new Map()
         this._nodeFrameCache = new Map()
         this._nodePending = new Map()
-        this._tidalFrontFrameCache = new Map()
-        this._tidalFrontPending = new Map()
         this.tidalFrontPolygon = options.profile?.polygon || null
         this.tidalFrontAoi = this.tidalEnabled ? resolveTidalFrontAoi({}, this.tidalFrontPolygon) : null
-        this._activeWindow = new Set()
+        this.tidalAvailable = false
+        this.tidalDisabledReason = null
+        this._tidal = null
         this._workerRequests = new Map()
         this._workerSequence = 0
+        this._workerFallbackWarned = false
         this._destroyed = false
-        this._decodeMesh(meshBuffer)
-        this._buildAdjacency()
-        this._buildIndex()
+        decodeMesh(this, meshBuffer)
+        buildAdjacency(this)
+        buildSpatialIndex(this)
         this._createWorker()
     }
 
-    _decodeMesh(meshBuffer) {
-        if (!(meshBuffer instanceof ArrayBuffer) || meshBuffer.byteLength < 16) throw new Error('Invalid mesh buffer')
-        const view = new DataView(meshBuffer)
-        if (view.getUint32(0, true) !== MESH_MAGIC) throw new Error('mesh.bin 魔数错误')
-        const nNodes = (this.nNodes = view.getUint32(4, true))
-        const nCells = view.getUint32(8, true)
-        const nTris = (this.nTris = view.getUint32(12, true))
-        if (nCells !== this.nCells) throw new Error('网格单元数与 manifest 不一致')
-        if (nNodes !== this.manifest.nNodes || nTris !== this.manifest.nTris) throw new Error('Mesh counts differ from manifest')
-        if (meshBuffer.byteLength !== 16 + nNodes * 12 + nTris * 6 + nCells * 16) throw new Error('Invalid mesh byte length')
-        let offset = 16
-        this.lon = new Float32Array(meshBuffer, offset, nNodes)
-        offset += nNodes * 4
-        this.lat = new Float32Array(meshBuffer, offset, nNodes)
-        offset += nNodes * 4
-        this.zb = new Float32Array(meshBuffer, offset, nNodes)
-        offset += nNodes * 4
-        this.tri = new Uint16Array(meshBuffer, offset, nTris * 3)
-        offset += nTris * 6
-        this.cellNode = new Uint16Array(meshBuffer, offset, nCells * 4)
-        offset += nCells * 8
-        for (const node of this.tri) if (node >= nNodes) throw new Error('Triangle node out of range')
-        for (const node of this.cellNode) if (node >= nNodes) throw new Error('Cell node out of range')
-        const floatArray = (start, count) => start % 4 === 0
-            ? new Float32Array(meshBuffer, start, count)
-            : Float32Array.from({ length: count }, (_, index) => view.getFloat32(start + index * 4, true))
-        this.cellLon = floatArray(offset, nCells)
-        offset += nCells * 4
-        this.cellLat = floatArray(offset, nCells)
-        offset += nCells * 4
-        if (offset !== meshBuffer.byteLength) {
-            throw new Error(`mesh.bin 长度不符 ${offset}/${meshBuffer.byteLength}`)
-        }
-    }
-
     async frame(index, options = {}) {
-        if (this._destroyed) throw new Error('流场数据已销毁')
+        if (this._destroyed) throw new FlowError('DISPOSED', '流场数据已销毁')
         const safeIndex = Math.max(0, Math.min(this.nFrames - 1, index))
         const cached = this._touch(this._rawFrames, safeIndex)
         if (cached) return cached
@@ -143,7 +143,7 @@ export class FlowFieldData {
             if (options.history) pending.pinned = true
             return pending.promise
         }
-        if (!this.apiBase) throw new Error(`旧数据入口未缓存第 ${safeIndex} 帧`)
+        if (!this.apiBase) throw new FlowError('DATA_UNAVAILABLE', `旧数据入口未缓存第 ${safeIndex} 帧`)
 
         const controller = new AbortController()
         let abortHandler
@@ -157,10 +157,10 @@ export class FlowFieldData {
         const promise = this.provider.getFrame(this.manifest, safeIndex, { signal: controller.signal })
             .then(buffer => {
                 controller.signal.throwIfAborted()
-                if (this._destroyed) throw new DOMException('Destroyed', 'AbortError')
-                if (!(buffer instanceof ArrayBuffer)) throw new Error('Provider must return ArrayBuffer')
+                if (this._destroyed) throw abortedError()
+                if (!(buffer instanceof ArrayBuffer)) throw new FlowError('INVALID_BINARY', '数据源必须返回 ArrayBuffer')
                 if (buffer.byteLength !== this.nCells * 3 * 2) {
-                    throw new Error(`第 ${safeIndex} 帧长度不符`)
+                    throw new FlowError('INVALID_BINARY', `第 ${safeIndex} 帧长度不符`)
                 }
                 const values = new Int16Array(buffer)
                 this._rawFrames.set(safeIndex, values)
@@ -202,26 +202,18 @@ export class FlowFieldData {
 
     cellValue(frame, cell) {
         const values = this._touch(this._rawFrames, frame)
-        if (!values) return null
-        const levelRaw = values[cell]
-        if (levelRaw === this.dry) return { level: 0, u: 0, v: 0, wet: false }
-        return {
-            level: levelRaw * this.levelScale,
-            u: values[this.nCells + cell] * this.uvScale,
-            v: values[2 * this.nCells + cell] * this.uvScale,
-            wet: true
-        }
+        return decodeCell(this, values, cell)
     }
 
     async nodeFrame(frame) {
-        if (this._destroyed) throw new Error('流场数据已销毁')
+        if (this._destroyed) throw new FlowError('DISPOSED', '流场数据已销毁')
         const cached = this._touch(this._nodeFrameCache, frame)
         if (cached) return cached
         if (this._nodePending.has(frame)) return this._nodePending.get(frame)
         const pending = this.frame(frame)
             .then(values => this._aggregate(frame, values))
             .then(result => {
-                if (this._destroyed) throw new DOMException('Destroyed', 'AbortError')
+                if (this._destroyed) throw abortedError()
                 this._nodeFrameCache.set(frame, result)
                 this._trimLru(this._nodeFrameCache, NODE_CACHE_LIMIT)
                 return result
@@ -233,56 +225,78 @@ export class FlowFieldData {
 
     /**
      * 返回当前时次的连续跟踪状态和浑水历史（视觉示意）。
-     *
-     * 按需从场次起点顺序建立历史，随机跳转与顺序播放结果一致。
+     * 支持 {signal} 取消：同帧并发共享，全部取消才真正中止构建。
      */
-    async tidalFrontFrame(frame) {
-        if (this._destroyed) throw new Error('流场数据已销毁')
-        const safeFrame = Math.max(0, Math.min(this.nFrames - 1, Math.floor(frame)))
-        const cached = this._touch(this._tidalFrontFrameCache, safeFrame)
-        if (cached) return cached
-        if (this._tidalFrontPending.has(safeFrame)) return this._tidalFrontPending.get(safeFrame)
-
-        const pending = this._loadTidalState(safeFrame).then(result => {
-            this._tidalFrontFrameCache.set(safeFrame, result)
-            this._trimLru(this._tidalFrontFrameCache, TIDAL_FRONT_CACHE_LIMIT)
-            return result
-        }).finally(() => this._tidalFrontPending.delete(safeFrame))
-        this._tidalFrontPending.set(safeFrame, pending)
-        return pending
+    async tidalFrontFrame(frame, options = {}) {
+        if (this._destroyed) throw new FlowError('DISPOSED', '流场数据已销毁')
+        if (!this.tidalAvailable) throw new FlowError('DATA_UNAVAILABLE', '潮头历史已按内存预算停用')
+        if (!this._tidal) this._tidal = new TidalHistory(this, { onProgress: this.options.onProgress })
+        return this._tidal.frame(frame, options)
     }
 
-    async _loadTidalState(frame) {
-        if (this._tidalEvolution?.history.length > frame) return this._tidalEvolution.output(frame)
-        if (this._worker) {
-            try { return await this._requestWorker({ type: 'tidalState', frame }) }
-            catch (error) { if (this._worker || this._destroyed) throw error }
-        }
-        // Deterministic fallback: rebuild from the beginning, never from whichever
-        // neighbouring frames happen to remain in the rendering LRU cache.
-        const run = async () => {
-            if (!this._tidalEvolution) this._tidalEvolution = new TidalEvolution(this)
-            const timeline = this._tidalEvolution, times = this.meta.times
-            while (timeline.history.length <= frame) {
-                if (this._destroyed) throw new Error('Flow data destroyed')
-                const index = timeline.history.length
-                const current = await this.frame(index, { history: true })
-                const seconds = (Date.parse(times[index]) - Date.parse(times[0])) / 1000
-                const dt = index ? (Date.parse(times[index]) - Date.parse(times[index - 1])) / 1000 : 0
-                timeline.step(index, this._tidalPreviousRaw || current, current, seconds, dt)
-                this._tidalPreviousRaw = current
+    _evaluateTidalBudget() {
+        if (!this.tidalEnabled) return
+        const mb = Number.isFinite(this.options.tidalHistoryBudgetMB) ? this.options.tidalHistoryBudgetMB : 256
+        const budget = mb * 1024 * 1024
+        try {
+            const cells = tidalGeometry(this).activeCells.length
+            const estimated = this.nFrames * cells * 4
+            if (estimated > budget) {
+                this.tidalAvailable = false
+                this.tidalDisabledReason = 'memory-budget'
+                this.options.onWarning?.({
+                    code: 'TIDAL_DISABLED_BUDGET',
+                    message: '潮头历史预计占用内存超出预算，本场次已停用潮头计算',
+                    detail: { estimatedBytes: estimated, budgetBytes: budget }
+                })
+                return
             }
-            return timeline.output(frame)
+            this.tidalAvailable = true
+        } catch {
+            this.tidalAvailable = false
+            this.tidalDisabledReason = 'unavailable'
         }
-        const result = (this._tidalFallbackQueue || Promise.resolve()).then(run)
-        this._tidalFallbackQueue = result.catch(() => {})
-        return result
+    }
+
+    get tidalAvailability() {
+        if (!this.tidalEnabled) return { available: false }
+        return this.tidalAvailable ? { available: true } : { available: false, reason: this.tidalDisabledReason ?? 'unavailable' }
+    }
+
+    get workerMode() {
+        if (this._worker) return 'worker'
+        if (this.options.worker === false) return 'none'
+        return 'main-thread'
+    }
+
+    get stats() {
+        const stats = this.meta.stats || {}
+        return {
+            levelMin: Number.isFinite(stats.levelMin) ? stats.levelMin : -3.5,
+            levelMax: Number.isFinite(stats.levelMax) ? stats.levelMax : 6.5,
+            speedMax: Number.isFinite(stats.speedMax) ? stats.speedMax : 2.5
+        }
+    }
+
+    diagnostics() {
+        return {
+            rawFramesCached: this._rawFrames.size,
+            nodeFramesCached: this._nodeFrameCache.size,
+            pendingRequests: this._pendingFrames.size + this._nodePending.size + (this._tidal?.pending.size ?? 0),
+            tidalHistoryFrames: this._tidal?.stats.frames ?? 0,
+            tidalHistoryBytes: this._tidal?.stats.bytes ?? 0,
+            worker: this.workerMode
+        }
     }
 
     _createWorker() {
         if (this.options.worker === false || (typeof Worker === 'undefined' && !this.options.workerFactory)) return
         try {
-            this._worker = this.options.workerFactory ? this.options.workerFactory() : new Worker(this.options.workerUrl || new URL('./flowFieldWorker.js', import.meta.url), { type: 'module' })
+            this._worker = this.options.workerFactory
+                ? this.options.workerFactory()
+                : this.options.workerUrl
+                    ? new Worker(this.options.workerUrl, { type: 'module' })
+                    : new Worker(new URL('./flowFieldWorker.js', import.meta.url), { type: 'module' })
             this._worker.onmessage = event => {
                 if (event.data.type === 'requestFrame') {
                     const worker = this._worker, { requestId, index } = event.data
@@ -295,10 +309,16 @@ export class FlowFieldData {
                     })
                     return
                 }
+                if (event.data.type === 'historyProgress') {
+                    const loaded = event.data.loaded ?? 0
+                    const target = Number.isFinite(event.data.target) ? event.data.target : loaded - 1
+                    this.options.onProgress?.({ phase: 'history', loaded, total: Math.max(loaded, target + 1) })
+                    return
+                }
                 const request = this._workerRequests.get(event.data.id)
                 if (!request) return
                 this._workerRequests.delete(event.data.id)
-                if (event.data.error) request.reject(new Error(event.data.error))
+                if (event.data.error) request.reject(new FlowError('WORKER_FAILED', event.data.error || 'Worker 执行失败'))
                 else request.resolve(event.data.state || new Float32Array(event.data.buffer))
             }
             this._worker.onerror = event => {
@@ -307,7 +327,7 @@ export class FlowFieldData {
                 this._workerRequests.clear()
                 this._worker && this._worker.terminate()
                 this._worker = null
-                console.warn('Web Worker 执行失败，将在主线程聚合', error)
+                this._warnWorkerFallback(error)
             }
             this._worker.postMessage({
                 type: 'init',
@@ -327,14 +347,32 @@ export class FlowFieldData {
                 polygon: this.tidalFrontPolygon
             })
         } catch (error) {
-            console.warn('Web Worker 初始化失败，将在主线程聚合', error)
             this._worker = null
+            this._warnWorkerFallback(error)
         }
     }
 
-    _aggregate(frame, values) {
-        if (!this._worker) return this._aggregateSync(values)
-        return this._requestWorker({ type: 'aggregate', frame, values })
+    _warnWorkerFallback(error) {
+        if (this._workerFallbackWarned) return
+        this._workerFallbackWarned = true
+        const warning = {
+            code: 'WORKER_FALLBACK',
+            message: 'Worker 执行失败，已回退到主线程计算',
+            detail: String(error?.message || error)
+        }
+        if (this.options.onWarning) this.options.onWarning(warning)
+        else console.warn(warning.message, error)
+    }
+
+    async _aggregate(frame, values) {
+        if (!this._worker) return aggregateSync(this, values)
+        try {
+            return await this._requestWorker({ type: 'aggregate', frame, values })
+        } catch (error) {
+            if (this._destroyed || error?.name === 'AbortError' || this._worker) throw error
+            this._warnWorkerFallback(error)
+            return aggregateSync(this, values)
+        }
     }
 
     _requestWorker(message) {
@@ -345,139 +383,76 @@ export class FlowFieldData {
         })
     }
 
-    _aggregateSync(values) {
-        const output = new Float32Array(this.nNodes * 4)
-        for (let node = 0; node < this.nNodes; node++) {
-            let level = 0
-            let u = 0
-            let v = 0
-            let wetCount = 0
-            const start = this._adjOffsets[node]
-            const end = this._adjOffsets[node + 1]
-            for (let cursor = start; cursor < end; cursor++) {
-                const cell = this._adj[cursor]
-                const rawLevel = values[cell]
-                if (rawLevel === this.dry) continue
-                wetCount++
-                level += rawLevel
-                u += values[this.nCells + cell]
-                v += values[2 * this.nCells + cell]
-            }
-            const offset = node * 4
-            if (wetCount) {
-                output[offset] = (level / wetCount) * this.levelScale
-                output[offset + 1] = (u / wetCount) * this.uvScale
-                output[offset + 2] = (v / wetCount) * this.uvScale
-                output[offset + 3] = wetCount / (end - start)
-            }
-        }
-        return output
-    }
-
-    _buildAdjacency() {
-        const counts = new Uint16Array(this.nNodes)
-        const unique = (cell, corner) => !(corner === 3 && this.cellNode[cell * 4 + 3] === this.cellNode[cell * 4])
-        for (let cell = 0; cell < this.nCells; cell++) {
-            for (let corner = 0; corner < 4; corner++) {
-                if (unique(cell, corner)) counts[this.cellNode[cell * 4 + corner]]++
-            }
-        }
-        const offsets = new Uint32Array(this.nNodes + 1)
-        for (let node = 0; node < this.nNodes; node++) offsets[node + 1] = offsets[node] + counts[node]
-        const adjacency = new Uint32Array(offsets[this.nNodes])
-        const cursor = Uint32Array.from(offsets.subarray(0, this.nNodes))
-        for (let cell = 0; cell < this.nCells; cell++) {
-            for (let corner = 0; corner < 4; corner++) {
-                if (unique(cell, corner)) adjacency[cursor[this.cellNode[cell * 4 + corner]]++] = cell
-            }
-        }
-        this._adjOffsets = offsets
-        this._adj = adjacency
-    }
-
-    _cellUniqCount(index) {
-        return this.cellNode[index * 4 + 3] === this.cellNode[index * 4] ? 3 : 4
-    }
-
-    _buildIndex() {
-        const [west, south, east, north] = this.bbox
-        this._ix = lon => Math.min(GRID - 1, Math.max(0, Math.floor(((lon - west) / (east - west)) * GRID)))
-        this._iy = lat => Math.min(GRID - 1, Math.max(0, Math.floor(((lat - south) / (north - south)) * GRID)))
-        const bins = (this._bins = new Array(GRID * GRID))
-        for (let cell = 0; cell < this.nCells; cell++) {
-            let minLon = Infinity
-            let maxLon = -Infinity
-            let minLat = Infinity
-            let maxLat = -Infinity
-            const count = this._cellUniqCount(cell)
-            for (let corner = 0; corner < count; corner++) {
-                const node = this.cellNode[cell * 4 + corner]
-                minLon = Math.min(minLon, this.lon[node])
-                maxLon = Math.max(maxLon, this.lon[node])
-                minLat = Math.min(minLat, this.lat[node])
-                maxLat = Math.max(maxLat, this.lat[node])
-            }
-            for (let y = this._iy(minLat); y <= this._iy(maxLat); y++) {
-                for (let x = this._ix(minLon); x <= this._ix(maxLon); x++) {
-                    const key = y * GRID + x
-                    ;(bins[key] || (bins[key] = [])).push(cell)
+    /** 可取消的 Worker 请求：signal 中止时向 Worker 发送 tidalCancel 并摘除挂起项。 */
+    _requestWorkerCancelable(message, signal) {
+        const id = ++this._workerSequence
+        let onAbort
+        const promise = new Promise((resolve, reject) => {
+            this._workerRequests.set(id, { resolve, reject })
+            this._worker.postMessage({ ...message, id })
+            if (!signal) return
+            onAbort = () => {
+                if (this._workerRequests.delete(id)) {
+                    try { this._worker?.postMessage({ type: 'tidalCancel', id }) } catch { }
+                    reject(abortedError())
                 }
             }
-        }
+            if (signal.aborted) onAbort()
+            else signal.addEventListener('abort', onAbort, { once: true })
+        })
+        if (signal && onAbort) return promise.finally(() => signal.removeEventListener('abort', onAbort))
+        return promise
     }
 
-    _pointInCell(index, lon, lat) {
-        const count = this._cellUniqCount(index)
-        let inside = false
-        for (let current = 0, previous = count - 1; current < count; previous = current++) {
-            const a = this.cellNode[index * 4 + current]
-            const b = this.cellNode[index * 4 + previous]
-            if (
-                this.lat[a] > lat !== this.lat[b] > lat &&
-                lon < ((this.lon[b] - this.lon[a]) * (lat - this.lat[a])) / (this.lat[b] - this.lat[a]) + this.lon[a]
-            ) {
-                inside = !inside
-            }
-        }
-        return inside
-    }
-
-    pickCell(lon, lat) {
-        const [west, south, east, north] = this.bbox
-        if (lon < west || lon > east || lat < south || lat > north) return -1
-        const bin = this._bins[this._iy(lat) * GRID + this._ix(lon)]
-        if (!bin) return -1
-        for (const index of bin) if (this._pointInCell(index, lon, lat)) return index
-        return -1
-    }
-
-    sampleCell(cell, time) {
-        const first = Math.max(0, Math.min(this.nFrames - 1, Math.floor(time)))
-        const second = Math.min(this.nFrames - 1, first + 1)
-        const ratio = Math.max(0, Math.min(1, time - first))
-        const a = this.cellValue(first, cell)
-        const b = this.cellValue(second, cell)
+    /**
+     * 两帧原始值在 cell 处的插值采样：干帧数值为 null，
+     * 一干一湿取湿帧并标记 wetTransition，零流速 dirDeg 为 null。
+     */
+    sampleValues(cell, ratio, valuesA, valuesB) {
+        const a = decodeCell(this, valuesA, cell)
+        const b = decodeCell(this, valuesB, cell)
         if (!a || !b) return null
-        if (!a.wet && !b.wet) return { cell, wet: false, level: 0, u: 0, v: 0, speed: 0, dirDeg: 0 }
+        if (!a.wet && !b.wet) {
+            return { wet: false, wetTransition: false, level: null, u: null, v: null, speed: null, dirDeg: null }
+        }
+        const wetTransition = a.wet !== b.wet
         const only = a.wet && b.wet ? null : a.wet ? a : b
         const level = only ? only.level : a.level + (b.level - a.level) * ratio
         const u = only ? only.u : a.u + (b.u - a.u) * ratio
         const v = only ? only.v : a.v + (b.v - a.v) * ratio
         const speed = Math.hypot(u, v)
-        const direction = (Math.atan2(u, v) * 180) / Math.PI
-        return { cell, wet: true, level, u, v, speed, dirDeg: (direction + 360) % 360 }
+        const dirDeg = speed < 1e-6 ? null : (Math.atan2(u, v) * 180 / Math.PI + 360) % 360
+        return { wet: true, wetTransition, level, u, v, speed, dirDeg }
     }
 
     async series(cell, signal) {
-        if (this.provider.querySeries) return this.provider.querySeries(this.manifest, cell, { signal })
-        const points = []
-        for (let index = 0; index < this.nFrames; index++) {
+        if (this.provider?.querySeries) {
+            const raw = await this.provider.querySeries(this.manifest, cell, { signal })
             signal?.throwIfAborted()
-            await this.frame(index, { signal, history: true })
-            const value = this.cellValue(index, cell)
-            points.push({ frameIndex: index, validTime: this.meta.times[index], dry: !value.wet, ...value })
+            return normalizeSeriesResult(raw, { scenarioId: this.scenarioId, cellIndex: cell, source: 'provider' })
         }
-        return { scenarioId: this.scenarioId, cellIndex: cell, points }
+        const points = new Array(this.nFrames)
+        let next = 0
+        const worker = async () => {
+            while (next < this.nFrames) {
+                const index = next++
+                signal?.throwIfAborted()
+                const values = await this.frame(index, { signal, history: true })
+                const value = decodeCell(this, values, cell)
+                points[index] = {
+                    frameIndex: index, validTime: this.meta.times[index],
+                    dry: !value?.wet,
+                    level: value?.level ?? null, u: value?.u ?? null, v: value?.v ?? null
+                }
+            }
+        }
+        await Promise.all(Array.from({ length: Math.min(4, this.nFrames) }, worker))
+        signal?.throwIfAborted()
+        return normalizeSeriesResult({ points }, { scenarioId: this.scenarioId, cellIndex: cell, source: 'frames' })
+    }
+
+    pickCell(lon, lat) {
+        return pickCell(this, lon, lat)
     }
 
     _touch(map, key) {
@@ -500,15 +475,14 @@ export class FlowFieldData {
         this._destroyed = true
         this._rawFrames.clear()
         this._nodeFrameCache.clear()
+        this._nodePending.clear()
         for (const request of this._pendingFrames.values()) request.controller.abort()
         this._pendingFrames.clear()
+        this._tidal?.destroy()
+        this._tidal = null
         this._worker && this._worker.terminate()
         this._worker = null
-        for (const request of this._workerRequests.values()) request.reject(new Error('数据已销毁'))
+        for (const request of this._workerRequests.values()) request.reject(abortedError())
         this._workerRequests.clear()
-        this._tidalFrontPending.clear()
-        this._tidalFrontFrameCache.clear()
-        this._tidalEvolution = null
-        this._tidalPreviousRaw = null
     }
 }

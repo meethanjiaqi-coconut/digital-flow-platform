@@ -12,6 +12,7 @@ try{
     $('timeline').value=Date.parse(s.displayedTime)-Date.parse(s.startTime)
     $('widthValue').textContent=s.options.particles.lineWidth
     $('trailValue').textContent=s.options.particles.trailSeconds
+    if(s.error)$('error').textContent=`${s.error.code}: ${s.error.message}`
   }
   render(flow.getState());flow.on('statechange',render)
   $('play').onclick=()=>action(()=>flow.getState().playing?flow.pause():flow.play())

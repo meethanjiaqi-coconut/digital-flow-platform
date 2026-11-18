@@ -33,7 +33,9 @@ export async function createDemo() {
   handler.setInputAction(async ({position})=>{
     try {
       const value=await flow.pick({x:position.x,y:position.y})
-      query.textContent=value ? `水位 ${value.level.toFixed(2)} m · 流速 ${value.speed.toFixed(2)} m/s · 流向 ${value.dirDeg.toFixed(0)}°` : '当前位置无模型数据'
+      query.textContent=!value ? '当前位置无模型数据'
+        : value.status==='dry' ? '当前位置为干单元（无水）'
+        : `水位 ${value.level?.toFixed(2) ?? '—'} m · 流速 ${value.speed?.toFixed(2) ?? '—'} m/s · 流向 ${value.dirDeg==null?'—':value.dirDeg.toFixed(0)+'°'}`
     }catch(e){query.textContent=e.message}
   },S.ScreenSpaceEventType.LEFT_CLICK)
   window.addEventListener('pagehide',()=>{handler.destroy();flow.destroy();viewer.destroy()},{once:true})

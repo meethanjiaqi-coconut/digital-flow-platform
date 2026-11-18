@@ -12,4 +12,4 @@ defineProps({ flow: { type: Object, required: true } })
 <template><FlowControls :flow="flow" @error="console.error" /></template>
 ```
 
-安装同版本 `@digital-flow/sdk@0.1.0-alpha.1`，以及 `vue@^3.5`、`tdesign-vue-next@^1.20.5`。可调播放、时间、粒子数量/宽度/拖尾、动态水面、倒影和潮头开关。场次选择器、查询图表等完整业务面板留给后续组件迭代。
+安装同版本 `@digital-flow/sdk@0.1.0-alpha.2`，以及 `vue@^3.5`、`tdesign-vue-next@^1.20.5`。可调播放、时间、粒子数量/宽度/拖尾、动态水面、倒影和潮头开关。场次选择器、查询图表等完整业务面板留给后续组件迭代。

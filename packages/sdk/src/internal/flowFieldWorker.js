@@ -38,6 +38,9 @@ async function pumpTidalHistory() {
             const dt = index ? (Date.parse(times[index]) - Date.parse(times[index - 1])) / 1000 : 0
             timeline.step(index, previousRaw || current, current, seconds, dt)
             previousRaw = current
+            const pending = tidalRequests.filter(request => request.frame >= timeline.history.length)
+            const target = pending.length ? Math.max(...pending.map(request => request.frame)) : index
+            self.postMessage({ type: 'historyProgress', loaded: timeline.history.length, target })
         }
     } catch (error) {
         for (const request of tidalRequests.splice(0)) self.postMessage({ id: request.id, error: error.message || String(error) })
@@ -83,6 +86,11 @@ self.onmessage = event => {
     }
     if (message.type === 'init') {
         state = message
+        return
+    }
+    if (message.type === 'tidalCancel') {
+        const index = tidalRequests.findIndex(request => request.id === message.id)
+        if (index >= 0) tidalRequests.splice(index, 1)
         return
     }
     if (state && message.type === 'tidalState') {

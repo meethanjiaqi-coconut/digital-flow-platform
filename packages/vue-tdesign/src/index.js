@@ -38,7 +38,7 @@ export const FlowControls = defineComponent({
         row('水色',h(Select,{value:s.options.water.colorMode,options:[{value:'river',label:'河口水面'},{value:'speed',label:'流速着色'},{value:'level',label:'水位着色'}],onChange:v=>patch({water:{colorMode:v}})})),
         row('岸边倒影',toggle('岸边倒影',s.options.water.reflection,v=>patch({water:{reflection:v}}))),
         ...(s.tidal.status==='disabled'?[]:[row('潮头清浊分界',toggle('潮头清浊分界',s.options.tidal.turbidity,v=>patch({tidal:{turbidity:v}}))),row('潮头标记',toggle('潮头标记',s.options.tidal.marker,v=>patch({tidal:{marker:v}}))),h('p',{class:'df-note'},'清浊分界由流场推断，用于视觉示意。')]),
-        message.value||s.error?h('p',{class:'df-error',role:'alert'},message.value||s.error):null
+        message.value||s.error?.message?h('p',{class:'df-error',role:'alert'},message.value||s.error?.message):null
       ])
     }
   }

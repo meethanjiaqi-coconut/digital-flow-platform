@@ -1,4 +1,4 @@
-# @digital-flow/sdk · 0.1.0-alpha.1
+# @digital-flow/sdk · 0.1.0-alpha.2
 
 框架无关的数字流场 SDK。加载真实网格和逐帧 U/V、水位，提供播放、查询、粒子与河口水面渲染。清浊分界是由流场推断的视觉示意，不是实测含沙量。
 
@@ -19,21 +19,35 @@ const flow = createFlowField({
   provider: createHttpProvider({
     baseUrl: '/flow-field',
     request: (url, init) => fetch(url, { ...init, credentials: 'include' }),
+    timeoutMs: 30000, // 可选；retry 默认 {retries:2,baseDelayMs:300,maxDelayMs:3000}，false 关闭
   }),
   extensions: [createTidalEstuary({ profile: qiantangProfile })],
   playback: { autoPlay: false, secondsPerFrame: 2, rate: 1 },
+  timeZone: 'Asia/Shanghai',          // 可选，UI 显示时区（ISO UTC 存储）
+  tidalHistoryBudgetMB: 256,          // 可选，潮头历史内存预算，超限自动停用
 })
 
-const unsubscribe = flow.on('statechange', state => console.log(state.displayedTime))
+const unsubscribe = flow.on('statechange', state => console.log(state.displayedTime, state.error?.message))
 await flow.loadScenario({ sourceRunId: 'RST-WUV-20261025-5MIN' })
 await flow.seek('2026-10-25T02:20:00+08:00')
 flow.setOptions({ particles: { count: 16384, lineWidth: 1, trailSeconds: 1.5 } })
 flow.play()
 const sample = await flow.queryAt({ lon: 120.325, lat: 30.275 })
+// sample.status === 'dry' 表示干单元（数值字段为 null）；域外返回 null
 // 宿主卸载时：
 unsubscribe()
-flow.destroy()
+await flow.destroy()
 ```
+
+## 事务式场次切换与错误模型
+
+`loadScenario` 在已有场次时保持 `status:'ready'`、`switching:true`：候选数据全部就绪并 attach 成功前旧场次原样可用；任一步失败自动回滚旧场次，首次加载失败才进入 `status:'error'`。相邻切换不会丢播放意图。
+
+公开方法抛出的非取消错误一律是 `FlowError`（`code`/`recoverable`/`toJSON()`，完整码表见 `docs/API约定.md`），唯一例外是被取代/取消的 `AbortError`。`state.error` 是其 JSON 快照。播放中瞬时取数失败会自动暂停并回退到已显示帧位，`play()`/`seek()` 后重试；渲染器上下文丢失经 `onError` 上报后可用 `reinitialize()` 重建会话。
+
+事件共八个：`statechange`、`error`、`destroy`、`progress`、`warning`、`scenariochange`、`timechange`、`ready`；订阅返回取消函数，未知事件名抛 `INVALID_ARGUMENT`。`getCapabilities()` 与 `getDiagnostics()` 分别返回能力快照（`series:'provider'|'frames'`、`worker` 模式、潮头可用性）与运行诊断（缓存计数、provider `getStats()`、最近 20 条 warning，不含 URL）。
+
+## 数据源
 
 静态文件服务：`createStaticProvider({ manifestUrl: '/data/package.json', request })`。自定义数据源实现 `FlowProvider`；所有二进制返回解压后的 `ArrayBuffer`。HTTP 与静态内置数据源同时兼容带 `Content-Encoding: gzip` 和原始 `.gz`。Worker 不独立请求数据，统一走主线程数据源，保留鉴权。
 
