@@ -1,0 +1,70 @@
+{
+  "source": "D:\\git_repo\\digital-flow-field",
+  "createdAt": "2026-11-16T13:27:08.892826+08:00",
+  "files": [
+    {
+      "path": "tdesign/src/flowfield/FlowFieldData.js",
+      "sha256": "b9353eb002fb0a6fb0adf4b198ed74777ce2881e84786676a0161798c14e45ba"
+    },
+    {
+      "path": "tdesign/src/flowfield/flowFieldWorker.js",
+      "sha256": "7e9d88d6313fb1393990e7efc6e5d153b84b4eb12bd7fd806b551b34c45898fe"
+    },
+    {
+      "path": "tdesign/src/flowfield/ParticleFlowLayer.js",
+      "sha256": "3f2a696e9cdeca02f6f84c670845d74de68a711d0c58747eb6aeae921dcff914"
+    },
+    {
+      "path": "tdesign/src/flowfield/W3dWaterSurfaceLayer.js",
+      "sha256": "34cdbb0e3d4163afce1451ad7a41c852087dadab9737ee4fa7dc8ff1e4a1cb91"
+    },
+    {
+      "path": "tdesign/src/flowfield/flowDynamics.js",
+      "sha256": "ad8ef55a25d9de55d2ea3c1dd77de22e32076c711465efdfe6149db0a9e190cc"
+    },
+    {
+      "path": "tdesign/src/flowfield/flowColorRamps.js",
+      "sha256": "e8a8dfc8f37093a6fff6ab8dfe0e5d83b06abc346e0a0d5c149acba2a12c1bba"
+    },
+    {
+      "path": "tdesign/src/flowfield/waterQualityPresets.js",
+      "sha256": "852898aed0435a94f453b53b360a82eb0263ccb8124bfb7c4f7ad8a8c7188802"
+    },
+    {
+      "path": "tdesign/src/flowfield/estuaryWaterMaterial.js",
+      "sha256": "ff0847ec10d7bd1a0639184725e6fade86b6d8f64f6869c1b74e0121e1e5e632"
+    },
+    {
+      "path": "tdesign/src/flowfield/estuaryVertexShader.js",
+      "sha256": "454878d27160c6211bf6c20d2ac982c54e2643347d7e27ad91340641d28957ff"
+    },
+    {
+      "path": "tdesign/src/flowfield/estuarySceneReflection.js",
+      "sha256": "517e022a38a0db4c9705fe5d97cf85c18ff2d024ef549579a08f389a5061bf4a"
+    },
+    {
+      "path": "tdesign/src/flowfield/tidal-front-layer.js",
+      "sha256": "5e618b77e70c902bb8df69412049dd34126b7ca38c5cd74417ad32455dae4fcd"
+    },
+    {
+      "path": "tdesign/src/flowfield/tidal-front-analysis.js",
+      "sha256": "a3863540b1136844571ae6e09b9c847074a0bc927ac4c45f9803dc8f7f6765ea"
+    },
+    {
+      "path": "tdesign/src/flowfield/tidalEvolution.js",
+      "sha256": "41210f384d4ce69b57239989b6e55fac08fb04139c11a1ed064e3b8e5b2d7f59"
+    },
+    {
+      "path": "tdesign/src/flowfield/tidalWaterMix.js",
+      "sha256": "ca01f423bc4e6fc709738c534855c0dc833507b6aeb90ac846a7a28fb91c05b0"
+    },
+    {
+      "path": "tdesign/src/flowfield/waterNormalTexture.js",
+      "sha256": "a422b76f1f3bc15d8e06bbd1d10c4f2c1c05cd94a1f8a6d9937d5964708364fc"
+    },
+    {
+      "path": "tdesign/src/flowfield/flowTime.js",
+      "sha256": "b0a3afe8c6cb22653cafba737140689751ef744e0964a948fe36dd0b8c677686"
+    }
+  ]
+}

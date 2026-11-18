@@ -1,0 +1,19 @@
+{
+  "name": "@digital-flow/sdk",
+  "version": "0.1.0-alpha.1",
+  "description": "Framework-independent flow field playback and SuperMap3D renderer",
+  "type": "module",
+  "license": "UNLICENSED",
+  "sideEffects": false,
+  "files": ["dist", "assets", "README.md"],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {"types":"./dist/index.d.ts", "import":"./dist/index.js"},
+    "./supermap3d": {"types":"./dist/supermap3d.d.ts", "import":"./dist/supermap3d.js"},
+    "./tidal-estuary": {"types":"./dist/tidal-estuary.d.ts", "import":"./dist/tidal-estuary.js"},
+    "./worker": "./dist/flowFieldWorker.js",
+    "./assets/*": "./assets/*"
+  },
+  "publishConfig": {"access":"restricted", "tag":"alpha"}
+}

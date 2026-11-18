@@ -1,0 +1,16 @@
+{
+  "sdkVersion": "0.1.0-alpha.1",
+  "policy": "Host supplies licensed runtime. Not distributed in npm packages.",
+  "files": [
+    {
+      "path": "SuperMap3D/SuperMap3D.js",
+      "bytes": 11345652,
+      "sha256": "b59329245ebe142e428ad06d2bfd3e6467d0d15ccdaac04cc7d534a14e00e057"
+    },
+    {
+      "path": "w3d/w3d.umd.js",
+      "bytes": 246957,
+      "sha256": "21a2839096c1cd197537f3e68a2ae37b7b0c56685fc785ba0e35efb64911e0f3"
+    }
+  ]
+}

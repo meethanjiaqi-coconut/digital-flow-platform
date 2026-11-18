@@ -1,0 +1,10 @@
+node_modules/
+local-assets/
+artifacts/
+output/
+.tmp/
+.playwright-cli/
+examples/vue/dist/
+packages/*/dist/
+*.log
+.npmrc.local

@@ -1,0 +1,4 @@
+# 复制到开发单位的项目 .npmrc，并替换真实私有仓库地址。
+# 不要把真实 token 提交到 Git；由开发者环境或 CI secret 提供 NPM_TOKEN。
+@digital-flow:registry=https://npm.example.com/
+//npm.example.com/:_authToken=${NPM_TOKEN}
