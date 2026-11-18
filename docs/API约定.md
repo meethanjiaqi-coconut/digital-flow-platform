@@ -46,7 +46,7 @@ applyPair 失败（非取消）时 `playing=false`、位置回退到 displayed �
 | `error` | FlowError | 公开失败（AbortError 不发） |
 | `destroy` | — | destroy 完成 |
 | `progress` | `{phase:'manifest'\|'mesh'\|'frames'\|'renderer'\|'history',loaded,total}` | 加载/切换/潮头历史构建 |
-| `warning` | `{code,message,detail?}` | WORKER_FALLBACK、TIDAL_DISABLED_BUDGET、ASSET_LOAD_FAILED（detail `{asset,url}`，url 已去 query/hash）、RUNTIME_DEGRADED（detail.missing）、PARTICLES_UNSUPPORTED（detail.reason）、CONTEXT_RESTORED |
+| `warning` | `{code,message,detail?}` | WORKER_FALLBACK、TIDAL_DISABLED_BUDGET、TIDAL_INTERVAL_UNVERIFIED（detail `{intervalsSeconds,allowedIntervalsSeconds}`）、ASSET_LOAD_FAILED（detail `{asset,url}`，url 已去 query/hash）、RUNTIME_DEGRADED（detail.missing）、PARTICLES_UNSUPPORTED（detail.reason）、CONTEXT_RESTORED |
 | `scenariochange` | `{previous,current}` | 场次提交成功（首次 previous=null） |
 | `timechange` | `{requestedTime,displayedTime,displayedFrame}` | displayedFrame 变化；播放中节流 10 次/秒，seek 完成/暂停/切换完成立即发 |
 | `ready` | FlowState | 加载或切换完成 |
@@ -76,7 +76,21 @@ applyPair 失败（非取消）时 `playing=false`、位置回退到 displayed �
 | `tidal.marker` | 默认 false，仅启用扩展后生效 |
 | `tidal.turbidity` | 默认 true，仅启用扩展后生效 |
 
-水面互斥规则（mergeOptions 按 patch 判定）：patch 把 `qualityPreset` 设为非 off → `colorMode` 自动为 `river`；patch 把 `colorMode` 设为 speed/level → `qualityPreset` 自动为 `off`；同一 patch 两者冲突抛 `INVALID_ARGUMENT`。河口清浊、沿流运动强度与微浪只在 `river + natural + 水质 off` 时生效。
+选项联动规则（mergeOptions 按 patch 判定，与原工程面板一致）：patch 设 `water.visible:false` → `water.arrows`/`tidal.marker` 强制 false，同一 patch 显式设 true 抛 `INVALID_ARGUMENT`；合并后水面不可见时 patch 设 `water.arrows:true`/`tidal.marker:true` 静默保持 false，重新打开水面不恢复；patch 设 `tidal.turbidity:true` → `water.qualityPreset='off'`、`water.palette='natural'`、`water.colorMode='river'`，同一 patch 冲突显式值抛 `INVALID_ARGUMENT`；patch 设 `qualityPreset` 非 off → `colorMode` 自动 `river` 且 `tidal.turbidity` 关闭，patch 设 `colorMode` 为 speed/level → `qualityPreset` 自动 `off`，同一 patch 冲突抛 `INVALID_ARGUMENT`。河口清浊、沿流运动强度与微浪只在 `river + natural + 水质 off` 时生效。
+
+## 潮头 Profile
+
+`createTidalEstuary({profile})` 与 `createFlowField` 的 `extensions[0].profile` 共用 `normalizeTidalProfile` 校验，非法输入一律 `INVALID_ARGUMENT`。Profile 结构：
+
+| 字段 | 约定 |
+| --- | --- |
+| `id` | 必填非空字符串 |
+| `polygon` | 必填，≥3 个 `[lon,lat]` 顶点的分析区外环 |
+| `seaward` | 必填，`'east'\|'west'\|'north'\|'south'`；潮头里程从该侧 AOI 边缘向上游度量 |
+| `parameters` | 可选对象，只允许 `DEFAULT_TIDAL_PARAMETERS`（`@digital-flow/sdk/tidal-estuary` 导出）的已有键、值为有限数；规范化后合并为完整参数表 |
+| `validatedIntervalsSeconds` | 可选正数数组；存在时场次相邻帧间隔（按秒、容差 1e-6）必须全部命中，否则本场次 `tidalAvailability={available:false,reason:'interval-unverified'}` 并发 `TIDAL_INTERVAL_UNVERIFIED`，普通流场不受影响、场次仍 `ready` |
+
+`qiantangProfile` 为 `seaward:'east'`、`validatedIntervalsSeconds:[300]`、默认参数副本，仅在 5 分钟间隔数据上验收。其他河口需自备 `polygon`/`seaward` 并按本河口数据重新校核间隔与参数阈值。
 
 ## 数据源
 

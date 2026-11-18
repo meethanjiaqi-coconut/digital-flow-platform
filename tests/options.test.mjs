@@ -86,6 +86,77 @@ test('互斥：同一 patch 内 qualityPreset 非 off 且 colorMode 非 river �
   assert.equal(okMode.water.qualityPreset, 'off')
 })
 
+test('联动：patch 关闭水面时箭头与潮头标记被强制关闭，再开水面仍保持关闭', () => {
+  const styled = mergeOptions(DEFAULT_OPTIONS, { water: { arrows: true }, tidal: { marker: true } })
+  assert.equal(styled.water.arrows, true)
+  assert.equal(styled.tidal.marker, true)
+  const hidden = mergeOptions(styled, { water: { visible: false } })
+  assert.equal(hidden.water.visible, false)
+  assert.equal(hidden.water.arrows, false)
+  assert.equal(hidden.tidal.marker, false)
+  const reshown = mergeOptions(hidden, { water: { visible: true } })
+  assert.equal(reshown.water.visible, true)
+  assert.equal(reshown.water.arrows, false)
+  assert.equal(reshown.tidal.marker, false)
+})
+
+test('联动：水面已关闭时 patch 开启箭头/潮头标记被静默保持关闭', () => {
+  const hidden = mergeOptions(DEFAULT_OPTIONS, { water: { visible: false } })
+  const merged = mergeOptions(hidden, { water: { arrows: true }, tidal: { marker: true } })
+  assert.equal(merged.water.visible, false)
+  assert.equal(merged.water.arrows, false)
+  assert.equal(merged.tidal.marker, false)
+})
+
+test('联动：同一 patch 关闭水面又显式开启箭头/潮头标记抛 INVALID_ARGUMENT', () => {
+  assertInvalid({ water: { visible: false, arrows: true } })
+  assertInvalid({ water: { visible: false }, tidal: { marker: true } })
+  const consistent = mergeOptions(DEFAULT_OPTIONS, { water: { visible: false, arrows: false }, tidal: { marker: false } })
+  assert.equal(consistent.water.visible, false)
+  assert.equal(consistent.water.arrows, false)
+  assert.equal(consistent.tidal.marker, false)
+})
+
+test('联动：开启潮头清浊分界时水质预设/色板/着色模式复位为 off/natural/river', () => {
+  const styled = mergeOptions(DEFAULT_OPTIONS, { water: { qualityPreset: 'III', palette: 'tech' } })
+  const merged = mergeOptions(styled, { tidal: { turbidity: true } })
+  assert.equal(merged.tidal.turbidity, true)
+  assert.equal(merged.water.qualityPreset, 'off')
+  assert.equal(merged.water.palette, 'natural')
+  assert.equal(merged.water.colorMode, 'river')
+  const speed = mergeOptions(DEFAULT_OPTIONS, { water: { colorMode: 'speed' } })
+  const mergedSpeed = mergeOptions(speed, { tidal: { turbidity: true } })
+  assert.equal(mergedSpeed.water.colorMode, 'river')
+  assert.equal(mergedSpeed.water.qualityPreset, 'off')
+  const keepTech = mergeOptions(DEFAULT_OPTIONS, { water: { palette: 'tech' }, tidal: { turbidity: false } })
+  assert.equal(keepTech.water.palette, 'tech')
+})
+
+test('联动：潮头清浊与同 patch 冲突的显式水面配置抛 INVALID_ARGUMENT', () => {
+  assertInvalid({ tidal: { turbidity: true }, water: { qualityPreset: 'III' } })
+  assertInvalid({ tidal: { turbidity: true }, water: { palette: 'tech' } })
+  assertInvalid({ tidal: { turbidity: true }, water: { colorMode: 'speed' } })
+  assertInvalid({ tidal: { turbidity: true }, water: { colorMode: 'level' } })
+  const consistent = mergeOptions(DEFAULT_OPTIONS, { tidal: { turbidity: true }, water: { qualityPreset: 'off', palette: 'natural', colorMode: 'river' } })
+  assert.equal(consistent.tidal.turbidity, true)
+  assert.equal(consistent.water.qualityPreset, 'off')
+  assert.equal(consistent.water.palette, 'natural')
+  assert.equal(consistent.water.colorMode, 'river')
+})
+
+test('联动：水质预设非 off 时潮头清浊被关闭', () => {
+  const turbid = mergeOptions(DEFAULT_OPTIONS, { tidal: { turbidity: true } })
+  assert.equal(turbid.tidal.turbidity, true)
+  const merged = mergeOptions(turbid, { water: { qualityPreset: 'II' } })
+  assert.equal(merged.water.qualityPreset, 'II')
+  assert.equal(merged.water.colorMode, 'river')
+  assert.equal(merged.tidal.turbidity, false)
+  assertInvalid({ water: { qualityPreset: 'II' }, tidal: { turbidity: true } })
+  const consistent = mergeOptions(DEFAULT_OPTIONS, { water: { qualityPreset: 'II' }, tidal: { turbidity: false } })
+  assert.equal(consistent.tidal.turbidity, false)
+  assert.equal(consistent.water.qualityPreset, 'II')
+})
+
 test('互斥规则不影响不相关 patch', () => {
   const merged = mergeOptions(DEFAULT_OPTIONS, { water: { arrows: true, waveAmplitude: 0.2 } })
   assert.equal(merged.water.arrows, true)

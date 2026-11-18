@@ -95,7 +95,7 @@ test('static gzip and HTTP providers route every request through injected authen
   const signal=AbortSignal.abort();await assert.rejects(request('any',{signal}),{name:'AbortError'})
 })
 test('worker history uses provider bridge and matches main-thread deterministic history',async()=>{
-  const f=fixture(), profile=createTidalEstuary({profile:{id:'fixture',polygon:[[119,29],[121,29],[121,31],[119,31]]}}).profile
+  const f=fixture(), profile=createTidalEstuary({profile:{id:'fixture',polygon:[[119,29],[121,29],[121,31],[119,31]],seaward:'east'}}).profile
   const workerFactory=()=>{
     const url=new URL('../packages/sdk/src/internal/flowFieldWorker.js',import.meta.url).href
     const worker=new Worker(`const {parentPort}=require('node:worker_threads'); globalThis.self={postMessage:(...args)=>parentPort.postMessage(...args)}; import(${JSON.stringify(url)}).then(()=>parentPort.on('message',data=>self.onmessage({data})));`,{eval:true})

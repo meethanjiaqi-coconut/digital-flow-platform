@@ -106,7 +106,7 @@ export class TidalFrontLayer {
     }
     setT(t, force = false) {
         this._t = Math.max(0, Math.min(1, Number(t) || 0))
-        this.front = interpolateTidalTrack(this._trackA, this._trackB, this._t)
+        this.front = interpolateTidalTrack(this._trackA, this._trackB, this._t, this.geometry.parameters)
         this._intensity = this.front.confidence
         this._active = this._intensity > 0.08 && Number.isFinite(this.front.longitude)
         this._updateFrontLabel(force)

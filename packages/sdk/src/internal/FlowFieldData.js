@@ -4,7 +4,7 @@ import { normalizeSeriesResult } from './normalize.js'
 import { aggregateSync, buildAdjacency, buildSpatialIndex, decodeMesh, pickCell } from './meshIndex.js'
 import { resolveTidalFrontAoi, resolveTidalFrontPolygon } from './tidal-front-analysis.js'
 import { TidalHistory } from './tidalHistory.js'
-import { tidalGeometry } from './tidalEvolution.js'
+import { evaluateTidalBudget, getTidalAvailability } from './tidalAvailability.js'
 /* global fetch, AbortController, Worker, URL */
 
 /**
@@ -48,7 +48,7 @@ export class FlowFieldData {
             options.signal?.throwIfAborted()
             const data = new FlowFieldData(manifest, mesh, provider, options)
             try {
-                data._evaluateTidalBudget()
+                evaluateTidalBudget(data)
                 let loaded = 0
                 const track = promise => promise.then(value => {
                     loaded++
@@ -120,6 +120,7 @@ export class FlowFieldData {
         this._nodePending = new Map()
         this.tidalFrontPolygon = options.profile?.polygon || null
         this.tidalFrontAoi = this.tidalEnabled ? resolveTidalFrontAoi({}, this.tidalFrontPolygon) : null
+        this.tidalProfile = options.profile || null
         this.tidalAvailable = false
         this.tidalDisabledReason = null
         this._tidal = null
@@ -229,38 +230,13 @@ export class FlowFieldData {
      */
     async tidalFrontFrame(frame, options = {}) {
         if (this._destroyed) throw new FlowError('DISPOSED', '流场数据已销毁')
-        if (!this.tidalAvailable) throw new FlowError('DATA_UNAVAILABLE', '潮头历史已按内存预算停用')
+        if (!this.tidalAvailable) throw new FlowError('DATA_UNAVAILABLE', '本场次潮头计算未启用')
         if (!this._tidal) this._tidal = new TidalHistory(this, { onProgress: this.options.onProgress })
         return this._tidal.frame(frame, options)
     }
 
-    _evaluateTidalBudget() {
-        if (!this.tidalEnabled) return
-        const mb = Number.isFinite(this.options.tidalHistoryBudgetMB) ? this.options.tidalHistoryBudgetMB : 256
-        const budget = mb * 1024 * 1024
-        try {
-            const cells = tidalGeometry(this).activeCells.length
-            const estimated = this.nFrames * cells * 4
-            if (estimated > budget) {
-                this.tidalAvailable = false
-                this.tidalDisabledReason = 'memory-budget'
-                this.options.onWarning?.({
-                    code: 'TIDAL_DISABLED_BUDGET',
-                    message: '潮头历史预计占用内存超出预算，本场次已停用潮头计算',
-                    detail: { estimatedBytes: estimated, budgetBytes: budget }
-                })
-                return
-            }
-            this.tidalAvailable = true
-        } catch {
-            this.tidalAvailable = false
-            this.tidalDisabledReason = 'unavailable'
-        }
-    }
-
     get tidalAvailability() {
-        if (!this.tidalEnabled) return { available: false }
-        return this.tidalAvailable ? { available: true } : { available: false, reason: this.tidalDisabledReason ?? 'unavailable' }
+        return getTidalAvailability(this)
     }
 
     get workerMode() {
@@ -344,7 +320,8 @@ export class FlowFieldData {
                 levelScale: this.levelScale,
                 uvScale: this.uvScale,
                 aoi: this.tidalFrontAoi,
-                polygon: this.tidalFrontPolygon
+                polygon: this.tidalFrontPolygon,
+                tidalProfile: this.tidalProfile
             })
         } catch (error) {
             this._worker = null

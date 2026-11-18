@@ -59,7 +59,7 @@ export class TidalWaterMix {
     setT(t) {
         this.t = Math.max(0, Math.min(1, Number(t) || 0))
         if (this.structured) {
-            this.front = interpolateTidalTrack(this.a, this.b, this.t)
+            this.front = interpolateTidalTrack(this.a, this.b, this.t, this.geometry.parameters)
             this.distance = this.front.distance
             this.intensity = smoothstep(0.08, 0.7, this.front.confidence)
             return

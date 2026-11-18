@@ -61,7 +61,17 @@ export default { optimizeDeps: { exclude: ['@digital-flow/sdk'] } }
 
 ## 渲染选项
 
-`quality: 'standard' | 'low'`（默认 standard）：low 降低流场纹理至 1024×512、拖尾按 0.5 倍分辨率；`getCapabilities().renderer.recommendedQuality` 在无 WebGL2 或最大纹理 <4096 时建议 low。`water` 组新增 `arrowScale`（1–80，默认 24）、`palette`（`'natural'|'tech'`，默认 natural）、`qualityPreset`（`'off'|'I'|'II'|'III'|'IV'|'V'|'BAD_V'`，选项见导出的 `WATER_QUALITY_OPTIONS`）。互斥规则：patch 设非 off 水质预设会把 `colorMode` 改为 `river`；patch 把 `colorMode` 设为 speed/level 会把 `qualityPreset` 改为 `off`；同一 patch 两者冲突抛 `INVALID_ARGUMENT`。河口清浊、沿流运动强度与微浪只在 `river + natural + 水质 off` 时生效。
+`quality: 'standard' | 'low'`（默认 standard）：low 降低流场纹理至 1024×512、拖尾按 0.5 倍分辨率；`getCapabilities().renderer.recommendedQuality` 在无 WebGL2 或最大纹理 <4096 时建议 low。`water` 组新增 `arrowScale`（1–80，默认 24）、`palette`（`'natural'|'tech'`，默认 natural）、`qualityPreset`（`'off'|'I'|'II'|'III'|'IV'|'V'|'BAD_V'`，选项见导出的 `WATER_QUALITY_OPTIONS`）。选项联动与原工程面板一致（mergeOptions 按 patch 判定）：patch 设 `water.visible:false` 会把 `water.arrows` 与 `tidal.marker` 置 false，同一 patch 显式把它们设为 true 抛 `INVALID_ARGUMENT`；合并后水面不可见时再设这两个开关被静默忽略，重新打开水面也不会恢复；patch 设 `tidal.turbidity:true` 会把 `qualityPreset`/`palette`/`colorMode` 复位为 `off`/`natural`/`river`，同一 patch 给出冲突显式值抛 `INVALID_ARGUMENT`；patch 设非 off 水质预设会把 `colorMode` 改为 `river` 并关闭 `tidal.turbidity`，patch 把 `colorMode` 设为 speed/level 会把 `qualityPreset` 改为 `off`，同一 patch 冲突抛 `INVALID_ARGUMENT`。河口清浊、沿流运动强度与微浪只在 `river + natural + 水质 off` 时生效。
+
+## 潮头 Profile
+
+`createTidalEstuary({ profile })` 的 Profile 结构为 `{ id, polygon, seaward, parameters?, validatedIntervalsSeconds? }`：
+
+- `polygon`：分析区外环 `[lon, lat]` 顶点数组（≥3 点）；`seaward`：入海方向 `'east'|'west'|'north'|'south'`，潮头里程从该侧边缘向上游度量，缺省或非法值抛 `INVALID_ARGUMENT`。
+- `parameters`：算法参数覆盖，只允许 `DEFAULT_TIDAL_PARAMETERS`（从 `@digital-flow/sdk/tidal-estuary` 导出）的已有键且值为有限数；省略的键用默认值。默认值与原工程逐字一致。
+- `validatedIntervalsSeconds`：已验证可用的相邻帧间隔（秒，正数数组）。场次任一相邻帧间隔不在列表内（容差 1e-6 秒）时，本场次停用潮头计算并发 `TIDAL_INTERVAL_UNVERIFIED` 警告（detail 含实际间隔集合与允许列表），`capabilities.tidal` 为 `{available:false, reason:'interval-unverified'}`，普通流场播放不受影响。
+
+`qiantangProfile` 显式声明 `seaward:'east'`、`validatedIntervalsSeconds:[300]` 与默认参数副本，仅在 5 分钟间隔数据上验收过。其他河口必须自备 `polygon` 与 `seaward`，并按本河口数据重新校核 `validatedIntervalsSeconds` 与 `parameters` 阈值。
 
 ## 数据源
 

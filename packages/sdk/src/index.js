@@ -6,6 +6,7 @@ import { destroyFlow, loadScenario, reinitialize } from './scenarioLoader.js'
 import { pause, play, seek, setOptions, setPlaybackRate, tick } from './playback.js'
 import { listScenarios, pick, queryAt, querySeries } from './query.js'
 import { LEVEL_COLOR_STOPS, SPEED_COLOR_STOPS } from './internal/flowColorRamps.js'
+import { normalizeTidalProfile } from './tidal-estuary.js'
 
 export { createHttpProvider, createStaticProvider } from './providers.js'
 export { DEFAULT_OPTIONS } from './validation.js'
@@ -35,11 +36,7 @@ export function createFlowField(config) {
   if (extensions.length > 1 || extensions.some(e => e?.kind !== 'tidal-estuary')) {
     invalid('仅支持一个 tidal-estuary 扩展')
   }
-  const profile = extensions[0]?.profile
-  if (extensions.length && (!profile?.id || !Array.isArray(profile.polygon) || profile.polygon.length < 3
-    || profile.polygon.some(p => p.length !== 2 || !p.every(Number.isFinite)))) {
-    invalid('潮汐扩展需要显式有效的 profile')
-  }
+  const profile = extensions.length ? normalizeTidalProfile(extensions[0].profile) : undefined
   if (!Number.isFinite(tidalHistoryBudgetMB) || tidalHistoryBudgetMB <= 0) {
     invalid('tidalHistoryBudgetMB 必须是正数')
   }

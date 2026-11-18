@@ -70,7 +70,7 @@ const waitFor = async (condition, timeout = 3000) => {
   }
 }
 
-const tidalProfile = () => createTidalEstuary({ profile: { id: 't', polygon: [[119, 29], [121, 29], [121, 31], [119, 31]] } }).profile
+const tidalProfile = () => createTidalEstuary({ profile: { id: 't', polygon: [[119, 29], [121, 29], [121, 31], [119, 31]], seaward: 'east' } }).profile
 
 test('shared meshId reuses the mesh buffer without a second getMesh', async () => {
   const f = fixture({ id: 'reuse-a' })

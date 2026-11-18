@@ -66,12 +66,32 @@ export function mergeOptions(current, patch = {}) {
   if (!['natural','tech'].includes(result.water.palette)) invalidOption('水面色板必须是 natural 或 tech')
   if (!WATER_QUALITY_OPTIONS.some(option => option.value === result.water.qualityPreset)) invalidOption('水质视觉预设无效')
   const waterPatch = isPlainObject(patch.water) ? patch.water : null
+  const tidalPatch = isPlainObject(patch.tidal) ? patch.tidal : null
+  const presetOn = waterPatch !== null && Object.hasOwn(waterPatch, 'qualityPreset') && result.water.qualityPreset !== 'off'
+  const themedMode = waterPatch !== null && Object.hasOwn(waterPatch, 'colorMode') && result.water.colorMode !== 'river'
+  const hidesWater = waterPatch !== null && Object.hasOwn(waterPatch, 'visible') && waterPatch.visible === false
+  const enablesTurbidity = tidalPatch !== null && tidalPatch.turbidity === true
+  // 同一 patch 内的显式冲突一律 INVALID_ARGUMENT；跨 patch 的联动一律静默改写。
+  if (presetOn && themedMode) invalidOption('水质视觉预设与着色模式冲突：预设非关闭时 colorMode 必须为 river')
+  if (hidesWater && (waterPatch.arrows === true || tidalPatch?.marker === true)) invalidOption('水面关闭时不能同时开启水面箭头或潮头标记')
+  if (enablesTurbidity && waterPatch) {
+    if (Object.hasOwn(waterPatch, 'qualityPreset') && result.water.qualityPreset !== 'off') invalidOption('潮头清浊分界与水质视觉预设冲突：开启清浊时预设必须为 off')
+    if (Object.hasOwn(waterPatch, 'palette') && result.water.palette !== 'natural') invalidOption('潮头清浊分界与水面色板冲突：开启清浊时色板必须为 natural')
+    if (Object.hasOwn(waterPatch, 'colorMode') && result.water.colorMode !== 'river') invalidOption('潮头清浊分界与着色模式冲突：开启清浊时 colorMode 必须为 river')
+  }
   if (waterPatch) {
-    const presetOn = Object.hasOwn(waterPatch, 'qualityPreset') && result.water.qualityPreset !== 'off'
-    const themedMode = Object.hasOwn(waterPatch, 'colorMode') && result.water.colorMode !== 'river'
-    if (presetOn && themedMode) invalidOption('水质视觉预设与着色模式冲突：预设非关闭时 colorMode 必须为 river')
-    if (presetOn) result.water.colorMode = 'river'
+    if (presetOn) { result.water.colorMode = 'river'; result.tidal.turbidity = false }
     if (themedMode) result.water.qualityPreset = 'off'
+  }
+  if (enablesTurbidity) {
+    result.water.qualityPreset = 'off'
+    result.water.palette = 'natural'
+    result.water.colorMode = 'river'
+  }
+  // 水面不可见时箭头与潮头标记保持关闭（合并后判定，覆盖本 patch 关闭与既有关闭两种情形）。
+  if (result.water.visible === false) {
+    result.water.arrows = false
+    result.tidal.marker = false
   }
   return result
 }

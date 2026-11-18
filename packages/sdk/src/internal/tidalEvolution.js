@@ -1,4 +1,5 @@
 import { createTidalRiverGeometry, pointInPolygon } from './tidal-front-analysis.js'
+import { DEFAULT_TIDAL_PARAMETERS } from './tidalParameters.js'
 
 const EMPTY = 0xffffffff
 export const clamp = (x, low = 0, high = 1) => Math.max(low, Math.min(high, x))
@@ -7,7 +8,13 @@ export const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a)); return 
 /** Shared spatial coordinates for the marker, crest and sediment interface. */
 export function tidalGeometry(data) {
     if (data._tidalGeometry) return data._tidalGeometry
-    const g = createTidalRiverGeometry({ ...data, polygon: data.tidalFrontPolygon || data.polygon, aoi: data.tidalFrontAoi || data.aoi })
+    const g = createTidalRiverGeometry({
+        ...data,
+        polygon: data.tidalFrontPolygon || data.polygon,
+        aoi: data.tidalFrontAoi || data.aoi,
+        seaward: data.tidalProfile?.seaward ?? data.seaward,
+        parameters: data.tidalProfile?.parameters ?? data.parameters
+    })
     const coordinates = new Float32Array(data.nNodes * 4), counts = new Uint16Array(data.nNodes)
     g.localIndex = new Int32Array(data.nCells).fill(-1)
     g.cellBed = new Float32Array(data.nCells)
@@ -31,7 +38,7 @@ export function tidalGeometry(data) {
     })
     for (let n = 0; n < data.nNodes; n++) if (counts[n]) {
         const k = n * 4; coordinates[k] /= counts[n]
-        coordinates[k + 1] = pointInPolygon(data.lon[n], data.lat[n], g.polygon) ? smooth(0, 6000, coordinates[k]) : 0
+        coordinates[k + 1] = pointInPolygon(data.lon[n], data.lat[n], g.polygon) ? smooth(0, g.parameters.polygonMaskRampMeters, coordinates[k]) : 0
         const size = Math.hypot(coordinates[k + 2], coordinates[k + 3]) || 1
         coordinates[k + 2] /= size; coordinates[k + 3] /= size
     }
@@ -42,31 +49,33 @@ export function tidalGeometry(data) {
 
 /** Keep alternative wet-to-wet velocity boundaries, rather than replacing the
  * previous bore with whichever flow component happens to be strongest today. */
-export function tidalCandidates(g, previous, current, dt = 300) {
+export function tidalCandidates(g, previous, current, dt) {
+    const p = g.parameters || DEFAULT_TIDAL_PARAMETERS
+    dt ??= p.referenceIntervalSeconds
     const { nCells: n, activeCells, dry, uvScale, levelScale } = g
     const along = new Float32Array(n), strength = new Float32Array(n), wet = new Uint8Array(n)
     for (const c of activeCells) {
         if (current[c] === dry || !Number.isFinite(g.riverDistance[c])) continue
         wet[c] = 1
         along[c] = (current[n + c] * g.upstreamX[c] + current[n * 2 + c] * g.upstreamY[c]) * uvScale
-        const rise = previous[c] === dry ? 0 : (current[c] - previous[c]) * levelScale * 300 / Math.max(1, dt)
-        strength[c] = smooth(0.035, 0.18, along[c]) * (0.55 + 0.45 * smooth(-0.03, 0.04, rise))
+        const rise = previous[c] === dry ? 0 : (current[c] - previous[c]) * levelScale * p.referenceIntervalSeconds / Math.max(1, dt)
+        strength[c] = smooth(p.candidateSpeedRampLow, p.candidateSpeedRampHigh, along[c]) * (p.candidateSpeedEvidence + p.candidateRiseEvidence * smooth(p.candidateRiseRampLow, p.candidateRiseRampHigh, rise))
     }
     const visited = new Uint8Array(n), eligible = new Uint8Array(n), componentScore = new Float32Array(n), queue = []
     let largestComponentScore = 0
     for (const first of activeCells) {
-        if (visited[first] || strength[first] < 0.12) continue
+        if (visited[first] || strength[first] < p.minComponentStrength) continue
         queue.length = 0; queue.push(first); visited[first] = 1
         let min = Infinity, max = -Infinity, score = 0
         for (let head = 0; head < queue.length; head++) {
             const c = queue[head]; min = Math.min(min, g.riverDistance[c]); max = Math.max(max, g.riverDistance[c]); score += strength[c] ** 2
             for (let j = 0; j < g.neighborCounts[c]; j++) {
                 const other = g.neighbors[c * 4 + j]
-                if (other === EMPTY || !g.activeMask[other] || visited[other] || strength[other] < 0.12) continue
+                if (other === EMPTY || !g.activeMask[other] || visited[other] || strength[other] < p.minComponentStrength) continue
                 visited[other] = 1; queue.push(other)
             }
         }
-        if (queue.length >= 18 && max - min >= 4000) {
+        if (queue.length >= p.minComponentCells && max - min >= p.minComponentSpanMeters) {
             largestComponentScore = Math.max(largestComponentScore, score)
             for (const c of queue) { eligible[c] = 1; componentScore[c] = score }
         }
@@ -78,11 +87,11 @@ export function tidalCandidates(g, previous, current, dt = 300) {
         for (let j = 0; j < g.neighborCounts[c]; j++) {
             const other = g.neighbors[c * 4 + j]
             if (other === EMPTY || !wet[other] || g.riverDistance[other] <= g.riverDistance[c]) continue
-            boundary = Math.max(boundary, strength[c] * smooth(-0.06, 0.08, -along[other]) * smooth(0.04, 0.4, along[c] - along[other]))
+            boundary = Math.max(boundary, strength[c] * smooth(p.opposingFlowRampLow, p.opposingFlowRampHigh, -along[other]) * smooth(p.flowJumpRampLow, p.flowJumpRampHigh, along[c] - along[other]))
         }
         boundary *= (componentScore[c] / largestComponentScore) ** 2
-        if (boundary < 0.015) continue
-        const bin = Math.floor(g.riverDistance[c] / 1000), cells = bins.get(bin) || []
+        if (boundary < p.minBoundaryStrength) continue
+        const bin = Math.floor(g.riverDistance[c] / p.candidateBinMeters), cells = bins.get(bin) || []
         cells.push({ c, weight: boundary }); bins.set(bin, cells)
     }
     const candidates = []
@@ -92,64 +101,67 @@ export function tidalCandidates(g, previous, current, dt = 300) {
         for (const { c, weight: w } of cells) {
             weight += w; distance += g.riverDistance[c] * w; lon += g.cellLon[c] * w; lat += g.cellLat[c] * w
             tx += g.upstreamX[c] * w; ty += g.upstreamY[c] * w
-            depth += Math.max(0.1, current[c] * levelScale - g.cellBed[c]) * w; speed += along[c] * w
+            depth += Math.max(p.minCandidateDepthMeters, current[c] * levelScale - g.cellBed[c]) * w; speed += along[c] * w
         }
-        if (weight < 0.04) continue
+        if (weight < p.minCandidateWeight) continue
         distance /= weight; lon /= weight; lat /= weight; depth /= weight; speed /= weight
         const length = Math.hypot(tx, ty) || 1; tx /= length; ty /= length
         let width = 0, best = Infinity, anchor = cells[0].c
         for (const { c } of cells) {
             const dx = (g.cellLon[c] - lon) * 111320 * Math.cos(lat * Math.PI / 180), dy = (g.cellLat[c] - lat) * 110540
             width = Math.max(width, Math.abs(dx * -ty + dy * tx) * 2)
-            const error = Math.abs(g.riverDistance[c] - distance) + Math.hypot(dx, dy) * 0.25
+            const error = Math.abs(g.riverDistance[c] - distance) + Math.hypot(dx, dy) * p.anchorSpatialWeight
             if (error < best) { best = error; anchor = c }
         }
         candidates.push({ distance: g.riverDistance[anchor], longitude: g.cellLon[anchor], latitude: g.cellLat[anchor],
-            tangentX: tx, tangentY: ty, width: clamp(width, 350, 6000), depth, speed,
-            score: weight, confidence: clamp(0.4 + weight * 0.18, 0, 0.94), cell: anchor })
+            tangentX: tx, tangentY: ty, width: clamp(width, p.candidateWidthMinMeters, p.candidateWidthMaxMeters), depth, speed,
+            score: weight, confidence: clamp(p.candidateConfidenceBase + weight * p.candidateConfidencePerWeight, 0, p.candidateConfidenceMax), cell: anchor })
     }
     candidates.sort((a, b) => b.score - a.score)
-    return candidates.filter((candidate, i) => candidate.distance >= 4000 && !candidates.slice(0, i).some(other => Math.abs(other.distance - candidate.distance) < 2200))
+    return candidates.filter((candidate, i) => candidate.distance >= p.minCandidateDistanceMeters && !candidates.slice(0, i).some(other => Math.abs(other.distance - candidate.distance) < p.candidateDedupMeters))
 }
 
 /** Causal association. Reject incompatible observations instead of clamping or
  * interpolating across kilometres of unsupported motion. Reacquisition starts
  * a new segment after three consistent observations; playback order is irrelevant. */
 export class TidalTracker {
-    constructor() { this.last = null; this.missing = 0; this.pending = null; this.segment = 0; this.velocity = 0 }
+    constructor(parameters = DEFAULT_TIDAL_PARAMETERS) {
+        this.p = parameters
+        this.last = null; this.missing = 0; this.pending = null; this.segment = 0; this.velocity = 0
+    }
     step(candidates, seconds, dt) {
-        const last = this.last
+        const p = this.p, last = this.last
         let selected
-        if (last && this.missing < 900) {
+        if (last && this.missing < p.trackerMaxMissingSeconds) {
             const age = seconds - last.seconds
             // This is a conservative association gate, not a measured bore speed.
             // Graph distance and coarse cells need a spatial uncertainty allowance.
-            const forward = clamp(Math.sqrt(9.81 * last.depth) + Math.max(0, last.speed), 12, 22) * age * 1.5 + 1000
-            const matches = candidates.filter(c => c.distance - last.distance >= -900 && c.distance - last.distance <= forward)
+            const forward = clamp(Math.sqrt(9.81 * last.depth) + Math.max(0, last.speed), p.trackerMinCelerity, p.trackerMaxCelerity) * age * p.trackerForwardSlack + p.trackerAllowanceMeters
+            const matches = candidates.filter(c => c.distance - last.distance >= -p.trackerBackwardToleranceMeters && c.distance - last.distance <= forward)
             matches.sort((a, b) => b.distance - a.distance || b.score - a.score)
             selected = matches[0]
         }
-        if (!last || this.missing >= 900) {
+        if (!last || this.missing >= p.trackerMaxMissingSeconds) {
             const candidate = candidates[0]
             if (candidate) {
-                const consistent = this.pending && Math.abs(candidate.distance - this.pending.distance) <= dt * 22 + 1000
+                const consistent = this.pending && Math.abs(candidate.distance - this.pending.distance) <= dt * p.trackerMaxCelerity + p.trackerAllowanceMeters
                 this.pending = { ...candidate, count: consistent ? this.pending.count + 1 : 1, origin: consistent ? this.pending.origin : candidate.distance }
-                if (this.pending.count >= (last ? 3 : 2) && candidate.distance - this.pending.origin > 350) { selected = candidate; this.segment++; this.velocity = 0 }
+                if (this.pending.count >= (last ? p.trackerConfirmCountWithTrack : p.trackerConfirmCountFresh) && candidate.distance - this.pending.origin > p.trackerMinAdvanceMeters) { selected = candidate; this.segment++; this.velocity = 0 }
             } else this.pending = null
         }
         if (selected) {
-            if (last && this.missing < 900) this.velocity = clamp((selected.distance - last.distance) / Math.max(1, seconds - last.seconds), 0, 18) * 0.5 + this.velocity * 0.5
+            if (last && this.missing < p.trackerMaxMissingSeconds) this.velocity = clamp((selected.distance - last.distance) / Math.max(1, seconds - last.seconds), 0, p.trackerMaxVelocity) * p.trackerVelocitySmoothing + this.velocity * (1 - p.trackerVelocitySmoothing)
             this.missing = 0; this.pending = null; this.last = { ...selected, seconds, segment: this.segment }
             return { ...this.last, status: 'tracked', rejected: candidates.filter(c => c !== selected).length }
         }
         this.missing += dt
-        if (last && this.missing <= dt * 1.1) return { ...last, seconds, confidence: last.confidence * 0.25, status: 'uncertain', rejected: candidates.length }
+        if (last && this.missing <= dt * p.trackerUncertainWindowFactor) return { ...last, seconds, confidence: last.confidence * p.trackerUncertainConfidenceDecay, status: 'uncertain', rejected: candidates.length }
         return { distance: last?.distance || 0, confidence: 0, segment: this.segment, status: candidates.length ? 'reacquiring' : 'unavailable', rejected: candidates.length }
     }
 }
 
-export function interpolateTidalTrack(a, b, t) {
-    const zero = { distance: 0, confidence: 0, width: 850, status: 'unavailable', segment: -1 }
+export function interpolateTidalTrack(a, b, t, parameters = DEFAULT_TIDAL_PARAMETERS) {
+    const zero = { distance: 0, confidence: 0, width: parameters.fallbackTrackWidthMeters, status: 'unavailable', segment: -1 }
     a ||= zero; b ||= zero; t = clamp(t)
     if (a.segment !== b.segment && a.confidence > 0 && b.confidence > 0) {
         const chosen = t < 0.5 ? a : b
@@ -190,15 +202,15 @@ export function locateTidalSection(g, track, isWet = () => true) {
  * diffusion and decay are display parameters, never measured concentration. */
 export class TidalEvolution {
     constructor(data) {
-        this.data = data; this.g = tidalGeometry(data); this.tracker = new TidalTracker()
+        this.data = data; this.g = tidalGeometry(data); this.tracker = new TidalTracker(this.g.parameters)
         this.history = []; this.sediment = new Float32Array(this.g.activeCells.length); this.previousTrack = null
     }
     step(frame, previous, current, seconds, dt) {
         if (frame !== this.history.length) throw new Error('Tidal history must be built in chronological order')
-        const g = this.g, n = g.nCells
+        const g = this.g, p = g.parameters, n = g.nCells
         const candidates = frame ? tidalCandidates(g, previous, current, dt) : []
         const track = frame ? this.tracker.step(candidates, seconds, dt) : { distance: 0, confidence: 0, status: 'unavailable', segment: 0 }
-        const steps = Math.max(1, Math.ceil(dt / 45)), delta = dt / steps
+        const steps = Math.max(1, Math.ceil(dt / p.sedimentSubstepSeconds)), delta = dt / steps
         for (let step = 0; step < steps; step++) {
             const next = new Float32Array(this.sediment.length)
             for (let i = 0; i < next.length; i++) {
@@ -210,16 +222,16 @@ export class TidalEvolution {
                     const k = c * 4 + j, other = g.neighbors[k], index = g.localIndex[other]
                     if (index < 0 || current[other] === g.dry) continue
                     const length = g.edgeLength[k]
-                    const transfer = delta * (Math.max(0, -u * g.edgeX[k] - v * g.edgeY[k]) / length + 20 / (length * length))
+                    const transfer = delta * (Math.max(0, -u * g.edgeX[k] - v * g.edgeY[k]) / length + p.sedimentDiffusionCoefficient / (length * length))
                     sum += this.sediment[index] * transfer; weight += transfer
                 }
-                let value = sum / weight * Math.exp(-delta / 2700)
+                let value = sum / weight * Math.exp(-delta / p.sedimentDecaySeconds)
                 if (track.status === 'tracked') {
                     const before = this.previousTrack?.segment === track.segment && this.previousTrack.confidence > 0 ? this.previousTrack.distance : track.distance
                     const front = before + (track.distance - before) * (step + 1) / steps
                     const offset = g.riverDistance[c] - front
-                    const source = Math.exp(-(((offset + 550) / 1300) ** 2)) * track.confidence
-                    value += (1 - value) * source * (1 - Math.exp(-delta / 110))
+                    const source = Math.exp(-(((offset + p.sedimentSourceOffsetMeters) / p.sedimentSourceWidthMeters) ** 2)) * track.confidence
+                    value += (1 - value) * source * (1 - Math.exp(-delta / p.sedimentSourceRiseSeconds))
                 }
                 next[i] = clamp(value)
             }

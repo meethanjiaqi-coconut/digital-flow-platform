@@ -122,9 +122,80 @@ export type FlowOptionsPatch = {
   [K in keyof FlowOptions]?: FlowOptions[K] extends object ? Partial<FlowOptions[K]> : FlowOptions[K]
 }
 
+export type TidalSeaward = 'east' | 'west' | 'north' | 'south'
+
+/** 潮头算法可调参数；键与 DEFAULT_TIDAL_PARAMETERS 一一对应，单位见 SDK 注释。 */
+export interface TidalParameters {
+  minLevelRiseMeters: number
+  minUpstreamSpeed: number
+  strongUpstreamSpeed: number
+  minTidalFlowStrength: number
+  minTidalComponentCells: number
+  minTidalComponentScore: number
+  minTidalComponentSpanMeters: number
+  minFrontBoundaryStrength: number
+  frontBandMeters: number
+  seawardSeedFraction: number
+  seawardSeedMinDegrees: number
+  upstreamGradientEpsilon: number
+  polygonMaskRampMeters: number
+  referenceIntervalSeconds: number
+  candidateSpeedRampLow: number
+  candidateSpeedRampHigh: number
+  candidateSpeedEvidence: number
+  candidateRiseEvidence: number
+  candidateRiseRampLow: number
+  candidateRiseRampHigh: number
+  minComponentStrength: number
+  minComponentCells: number
+  minComponentSpanMeters: number
+  opposingFlowRampLow: number
+  opposingFlowRampHigh: number
+  flowJumpRampLow: number
+  flowJumpRampHigh: number
+  minBoundaryStrength: number
+  candidateBinMeters: number
+  minCandidateDepthMeters: number
+  minCandidateWeight: number
+  anchorSpatialWeight: number
+  candidateWidthMinMeters: number
+  candidateWidthMaxMeters: number
+  candidateConfidenceBase: number
+  candidateConfidencePerWeight: number
+  candidateConfidenceMax: number
+  minCandidateDistanceMeters: number
+  candidateDedupMeters: number
+  trackerMaxMissingSeconds: number
+  trackerMinCelerity: number
+  trackerMaxCelerity: number
+  trackerForwardSlack: number
+  trackerAllowanceMeters: number
+  trackerBackwardToleranceMeters: number
+  trackerConfirmCountWithTrack: number
+  trackerConfirmCountFresh: number
+  trackerMinAdvanceMeters: number
+  trackerMaxVelocity: number
+  trackerVelocitySmoothing: number
+  trackerUncertainWindowFactor: number
+  trackerUncertainConfidenceDecay: number
+  fallbackTrackWidthMeters: number
+  sedimentSubstepSeconds: number
+  sedimentDiffusionCoefficient: number
+  sedimentDecaySeconds: number
+  sedimentSourceOffsetMeters: number
+  sedimentSourceWidthMeters: number
+  sedimentSourceRiseSeconds: number
+}
+
 export interface TidalProfile {
   id: string
   polygon: ReadonlyArray<readonly [number, number]>
+  /** 入海方向：潮头里程从该侧边缘向上游度量。 */
+  seaward: TidalSeaward
+  /** 算法参数覆盖；省略的键使用 DEFAULT_TIDAL_PARAMETERS 默认值。 */
+  parameters?: Partial<TidalParameters>
+  /** 已验证可用的相邻帧间隔（秒）；场次间隔不匹配时本场次停用潮头。 */
+  validatedIntervalsSeconds?: readonly number[]
   visualOnly?: boolean
 }
 export interface TidalExtension { kind: 'tidal-estuary'; profile: TidalProfile }
