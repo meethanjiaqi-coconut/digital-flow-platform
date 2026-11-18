@@ -4,13 +4,13 @@
 
 ```js
 import { createFlowField, createHttpProvider } from '@digital-flow/sdk'
-import { createSuperMap3DRenderer } from '@digital-flow/sdk/supermap3d'
+import { createSuperMap3DRenderer, webMercatorProj4 } from '@digital-flow/sdk/supermap3d'
 import { createTidalEstuary, qiantangProfile } from '@digital-flow/sdk/tidal-estuary'
 
 const flow = createFlowField({
   renderer: createSuperMap3DRenderer({
     viewer, // 由宿主创建和销毁
-    runtime: { SuperMap3D, w3d },
+    runtime: { SuperMap3D, w3d, proj4: webMercatorProj4 },
     assets: {
       colorTable: '/runtime/SuperMap3D/Assets/Data/colorTable.png',
       colorTable2: '/runtime/SuperMap3D/Assets/Data/colorTable2.png',
@@ -47,11 +47,27 @@ await flow.destroy()
 
 事件共八个：`statechange`、`error`、`destroy`、`progress`、`warning`、`scenariochange`、`timechange`、`ready`；订阅返回取消函数，未知事件名抛 `INVALID_ARGUMENT`。`getCapabilities()` 与 `getDiagnostics()` 分别返回能力快照（`series:'provider'|'frames'`、`worker` 模式、潮头可用性）与运行诊断（缓存计数、provider `getStats()`、最近 20 条 warning，不含 URL）。
 
+## 打包工具接入
+
+**Vite 开发模式必须排除依赖预构建**，否则 Worker 404、法线纹理返回 HTML：
+
+```js
+export default { optimizeDeps: { exclude: ['@digital-flow/sdk'] } }
+```
+
+生产构建会把 Worker 与纹理产出到 `assets/`，无需额外配置。webpack 5 等若未复制 Worker/纹理，传 `workerUrl`/`workerFactory` 与 `assets.normals` 指定发布地址。出现 `WORKER_FALLBACK`、`ASSET_LOAD_FAILED` 警告即说明资源路径有问题。
+
+**`runtime.proj4` 三条规则**：`globalThis.proj4` 已是函数则直接使用、不覆盖；否则安装 `runtime.proj4`（可用导出的 `webMercatorProj4`，仅支持 EPSG:4326→EPSG:3857）；两者都没有时 attach 抛 `UNSUPPORTED_RUNTIME`。会话结束只恢复仍是 SDK 安装的全局，宿主中途替换的值会保留。
+
+## 渲染选项
+
+`quality: 'standard' | 'low'`（默认 standard）：low 降低流场纹理至 1024×512、拖尾按 0.5 倍分辨率；`getCapabilities().renderer.recommendedQuality` 在无 WebGL2 或最大纹理 <4096 时建议 low。`water` 组新增 `arrowScale`（1–80，默认 24）、`palette`（`'natural'|'tech'`，默认 natural）、`qualityPreset`（`'off'|'I'|'II'|'III'|'IV'|'V'|'BAD_V'`，选项见导出的 `WATER_QUALITY_OPTIONS`）。互斥规则：patch 设非 off 水质预设会把 `colorMode` 改为 `river`；patch 把 `colorMode` 设为 speed/level 会把 `qualityPreset` 改为 `off`；同一 patch 两者冲突抛 `INVALID_ARGUMENT`。河口清浊、沿流运动强度与微浪只在 `river + natural + 水质 off` 时生效。
+
 ## 数据源
 
 静态文件服务：`createStaticProvider({ manifestUrl: '/data/package.json', request })`。自定义数据源实现 `FlowProvider`；所有二进制返回解压后的 `ArrayBuffer`。HTTP 与静态内置数据源同时兼容带 `Content-Encoding: gzip` 和原始 `.gz`。Worker 不独立请求数据，统一走主线程数据源，保留鉴权。
 
-ESM 包包含类型、Worker、水面法线纹理及纹理来源说明。**不包含** SuperMap3D/W3D 引擎、许可、底图和业务模型数据。宿主提供已授权的匹配运行时。打包工具未复制 Worker/纹理时，使用 `workerUrl`/`workerFactory` 和 `assets.normals` 指定发布地址；Worker 需同源或遵守宿主 CSP。
+ESM 包包含类型、Worker、水面法线纹理及纹理来源说明。**不包含** SuperMap3D/W3D 引擎、许可、底图和业务模型数据。宿主提供已授权的匹配运行时；未复制 Worker/纹理时用 `workerUrl`/`workerFactory` 和 `assets.normals` 指定地址，Worker 需同源或遵守宿主 CSP。
 
 SDK 不自动播放、不移动相机、不绑定点击、不接管宿主时钟，也不销毁 Viewer。可选河口扩展必须显式传入区域配置；不配置扩展时不计算潮头。首版支持桌面浏览器、单页面单个活动 SuperMap3D 流场实例，节点数最多 65535；具体运行时指纹见工程 `runtime-manifests`。
 

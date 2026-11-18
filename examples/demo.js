@@ -1,5 +1,5 @@
 import {createFlowField,createStaticProvider} from '@digital-flow/sdk'
-import {createSuperMap3DRenderer} from '@digital-flow/sdk/supermap3d'
+import {createSuperMap3DRenderer,webMercatorProj4} from '@digital-flow/sdk/supermap3d'
 import {createTidalEstuary,qiantangProfile} from '@digital-flow/sdk/tidal-estuary'
 
 export async function createDemo() {
@@ -16,7 +16,7 @@ export async function createDemo() {
   viewer.camera.setView({destination:S.Cartesian3.fromDegrees(120.65,30.35,125000),orientation:{heading:0,pitch:-Math.PI/2,roll:0}})
   const provider=createStaticProvider({manifestUrl:new URL('local-assets/data/5min/package.json',root).href})
   const create=()=>createFlowField({
-    renderer:createSuperMap3DRenderer({viewer,runtime:{SuperMap3D:S,w3d:globalThis.w3d},assets:{
+    renderer:createSuperMap3DRenderer({viewer,runtime:{SuperMap3D:S,w3d:globalThis.w3d,proj4:webMercatorProj4},assets:{
       colorTable:new URL('local-assets/runtime/SuperMap3D/Assets/Data/colorTable.png',root).href,
       colorTable2:new URL('local-assets/runtime/SuperMap3D/Assets/Data/colorTable2.png',root).href
     }}),

@@ -31,6 +31,7 @@ async (page) => {
       result.cycles.push({cycle:i+1,...metrics(),gl:v.scene.context._gl.getError()})
     }
     result.hostAlive=!v.isDestroyed()
+    result.warnings=flow.getDiagnostics().warnings
     const keys=Object.keys(result.baseline)
     result.lifecyclePassed=result.cycles.every(c=>keys.every(k=>c[k]===result.baseline[k])&&c.gl===0)&&errors.length===0
     removeError()

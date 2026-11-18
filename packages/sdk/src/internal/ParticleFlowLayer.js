@@ -270,15 +270,20 @@ const ADD_BLEND = {
 }
 
 export class ParticleFlowLayer {
-    constructor(data, viewer) {
+    constructor(data, viewer, { onWarning } = {}) {
         this.data = data
         this.viewer = viewer
+        this._onWarning = onWarning
         this.show = true
         this._t = 0
         this._exagg = 60
         this._dim = DEFAULT_PARTICLE_SETTINGS.dimension
+        this._quality = 'standard'
         this._fieldW = 2048
         this._fieldH = 1024
+        this._trailScale = 1
+        this._rebuildTrails = false
+        this.unavailableReason = null
         this._trailSeconds = DEFAULT_PARTICLE_TRAIL_SECONDS
         this._opacity = DEFAULT_PARTICLE_SETTINGS.opacity
         this._width = DEFAULT_PARTICLE_SETTINGS.width // 条带头部半宽(像素)
@@ -346,6 +351,41 @@ export class ParticleFlowLayer {
         this.setWidth(DEFAULT_PARTICLE_SETTINGS.width)
         this._opacity = DEFAULT_PARTICLE_SETTINGS.opacity
         this.setTrailDuration(DEFAULT_PARTICLE_TRAIL_SECONDS)
+    }
+
+    /**
+     * 质量档位：standard = 流场 2048×1024 + 拖尾全分辨率（默认，逐像素同现状）；
+     * low = 流场 1024×512 + 拖尾按 0.5 倍画布分辨率。
+     */
+    setQuality(value) {
+        const quality = value === 'low' ? 'low' : 'standard'
+        if (quality === this._quality) return this._quality
+        this._quality = quality
+        this._fieldW = quality === 'low' ? 1024 : 2048
+        this._fieldH = quality === 'low' ? 512 : 1024
+        this._trailScale = quality === 'low' ? 0.5 : 1
+        if (this._ready) {
+            this._destroyFieldTarget()
+            this._createFieldTarget(this.viewer.scene.context)
+            this._fieldDirty = true
+            this._rebuildTrails = true
+            this._clearTrails = true
+            this._renderDirty = true
+            this.viewer.scene.requestRender?.()
+        }
+        return this._quality
+    }
+
+    resetTrails() {
+        this._clearTrails = true
+    }
+
+    _disableParticles(reason) {
+        this.unavailableReason = reason
+        this.show = false
+        const warning = { code: 'PARTICLES_UNSUPPORTED', message: `粒子流场不可用：${reason}`, detail: { reason } }
+        if (this._onWarning) this._onWarning(warning)
+        else console.warn('[ParticleFlowLayer]', warning.message)
     }
 
     // ---------------------------------------------------------- resources
@@ -418,6 +458,11 @@ export class ParticleFlowLayer {
             source: rampCanvas(),
             sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2601, magnificationFilter: 0x2601 })
         })
+        this._createFieldTarget(context)
+    }
+
+    _createFieldTarget(context) {
+        const S = SuperMap3D
         // NEAREST:避免依赖 OES_texture_float_linear(缺失时 LINEAR 采样浮点纹理恒返回 0)
         this._fieldTex = new S.Texture({
             context,
@@ -428,6 +473,13 @@ export class ParticleFlowLayer {
             sampler: new S.Sampler({ wrapS: 0x812f, wrapT: 0x812f, minificationFilter: 0x2600, magnificationFilter: 0x2600 })
         })
         this._fieldFB = new S.Framebuffer({ context, colorTextures: [this._fieldTex], destroyAttachments: false })
+    }
+
+    _destroyFieldTarget() {
+        for (const key of ['_fieldFB', '_fieldTex']) {
+            if (this[key] && this[key].destroy && !(this[key].isDestroyed && this[key].isDestroyed())) this[key].destroy()
+            this[key] = undefined
+        }
     }
 
     _createParticles(context) {
@@ -531,8 +583,8 @@ export class ParticleFlowLayer {
 
     _createTrails(context) {
         const S = SuperMap3D
-        const w = (this._trailW = context.drawingBufferWidth)
-        const h = (this._trailH = context.drawingBufferHeight)
+        const w = (this._trailW = Math.max(1, Math.round(context.drawingBufferWidth * this._trailScale)))
+        const h = (this._trailH = Math.max(1, Math.round(context.drawingBufferHeight * this._trailScale)))
         const mk = () => {
             const tex = new S.Texture({
                 context,
@@ -655,6 +707,7 @@ export class ParticleFlowLayer {
         const S = SuperMap3D
         const context = frameState.context
         if (!this._ready) {
+            if (this.unavailableReason) { this.show = false; return }
             const gl = context._gl
             const isWebGL2 = typeof WebGL2RenderingContext !== 'undefined' && gl instanceof WebGL2RenderingContext
             const floatRenderable = isWebGL2
@@ -662,15 +715,7 @@ export class ParticleFlowLayer {
                 : !!gl.getExtension('OES_texture_float') && !!gl.getExtension('WEBGL_color_buffer_float')
             const uintIndex = isWebGL2 || !!gl.getExtension('OES_element_index_uint')
             if (!floatRenderable || !uintIndex) {
-                console.warn(
-                    '[ParticleFlowLayer] GPU 能力不足(float 渲染或 uint 索引缺失),粒子层禁用。isWebGL2=',
-                    isWebGL2,
-                    'floatRenderable=',
-                    floatRenderable,
-                    'uintIndex=',
-                    uintIndex
-                )
-                this.show = false
+                this._disableParticles(`GPU 能力不足(float 渲染或 uint 索引缺失) isWebGL2=${isWebGL2} floatRenderable=${floatRenderable} uintIndex=${uintIndex}`)
                 return
             }
             try {
@@ -681,8 +726,7 @@ export class ParticleFlowLayer {
                 this._ready = true
                 console.info('[ParticleFlowLayer] 初始化完成 isWebGL2=', isWebGL2, 'dim=', this._dim)
             } catch (e) {
-                console.error('[ParticleFlowLayer] 初始化失败,粒子层禁用:', e)
-                this.show = false
+                this._disableParticles(`初始化失败：${e?.message ?? e}`)
                 return
             }
         }
@@ -707,7 +751,10 @@ export class ParticleFlowLayer {
             this._clearTrails = true
             this._renderDirty = true
         }
-        if (context.drawingBufferWidth !== this._trailW || context.drawingBufferHeight !== this._trailH) {
+        const trailW = Math.max(1, Math.round(context.drawingBufferWidth * this._trailScale))
+        const trailH = Math.max(1, Math.round(context.drawingBufferHeight * this._trailScale))
+        if (this._rebuildTrails || trailW !== this._trailW || trailH !== this._trailH) {
+            this._rebuildTrails = false
             this._destroyTrails()
             this._createTrails(context)
         }
@@ -807,7 +854,8 @@ export class ParticleFlowLayer {
                         u_bbox: bboxUniform,
                         u_exagg: () => this._exagg,
                         u_viewport: () => new S.Cartesian2(this._trailW, this._trailH),
-                        u_width: () => this._width,
+                        // u_width 语义为屏幕像素；拖尾纹理是 _trailScale 倍分辨率，换算回纹素宽度
+                        u_width: () => this._width * this._trailScale,
                         u_preview: () => !advance || reseed,
                         u_previewSeconds: () => this._trailSeconds * 0.2,
                         u_speedScale: () => speedScale,
@@ -824,7 +872,7 @@ export class ParticleFlowLayer {
         } catch (e) {
             if (!this._runError) {
                 this._runError = true
-                console.error('[ParticleFlowLayer] 离屏渲染失败,粒子层禁用:', e)
+                this._disableParticles(`离屏渲染失败：${e?.message ?? e}`)
             }
             this.show = false
             return

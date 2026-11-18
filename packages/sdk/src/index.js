@@ -5,11 +5,14 @@ import { subscribe } from './events.js'
 import { destroyFlow, loadScenario, reinitialize } from './scenarioLoader.js'
 import { pause, play, seek, setOptions, setPlaybackRate, tick } from './playback.js'
 import { listScenarios, pick, queryAt, querySeries } from './query.js'
+import { LEVEL_COLOR_STOPS, SPEED_COLOR_STOPS } from './internal/flowColorRamps.js'
 
 export { createHttpProvider, createStaticProvider } from './providers.js'
 export { DEFAULT_OPTIONS } from './validation.js'
 export { FlowError, isFlowError } from './errors.js'
+export { WATER_QUALITY_OPTIONS } from './internal/waterQualityPresets.js'
 export const VERSION = '0.1.0-alpha.2'
+export const COLOR_RAMPS = Object.freeze({ level: LEVEL_COLOR_STOPS, speed: SPEED_COLOR_STOPS })
 
 const invalid = message => { throw new FlowError('INVALID_ARGUMENT', message) }
 

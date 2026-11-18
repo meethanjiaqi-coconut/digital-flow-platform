@@ -6,6 +6,7 @@ import { addEstuaryVertexShading } from './estuaryVertexShader.js'
 import { TidalWaterMix } from './tidalWaterMix.js'
 import { FlowDisplacement, ShorelineDistance, normalizeFlowStrength, DEFAULT_FLOW_STRENGTH } from './flowDynamics.js'
 import { getWaterQualityPreset, normalizeWaterQuality, WATER_QUALITY_OFF } from './waterQualityPresets.js'
+import { assetUrl } from './rendererSupport.js'
 
 const GRID_TYPE_INDEX_BUFFER = 3
 const WET_THRESHOLD = 0.22
@@ -23,20 +24,6 @@ function normalizeWaterArrowScale(value) {
     const scale = Number(value)
     if (!Number.isFinite(scale)) return DEFAULT_WATER_ARROW_SCALE
     return Math.max(MIN_WATER_ARROW_SCALE, Math.min(MAX_WATER_ARROW_SCALE, scale))
-}
-
-function installWebMercatorProjection() {
-    if (typeof window.proj4 === 'function') return
-    window.proj4 = (source, target, coordinate) => {
-        if (source !== 'EPSG:4326' || target !== 'EPSG:3857') {
-            throw new Error(`W3D 暂不支持投影转换：${source} -> ${target}`)
-        }
-        const lon = Number(coordinate[0])
-        const lat = Math.max(-85.05112878, Math.min(85.05112878, Number(coordinate[1])))
-        const x = (lon * 20037508.34) / 180
-        const y = (Math.log(Math.tan(((90 + lat) * Math.PI) / 360)) * 20037508.34) / Math.PI
-        return [x, y]
-    }
 }
 
 function cloneJulianDate(value) {
@@ -132,8 +119,9 @@ function createColorRampTexture(viewer, colors) {
  * 接口、帧格式和缓存策略均不变：W3D 不发起模型数据请求，也只持有当前帧和下一帧。
  */
 export class W3dWaterSurfaceLayer {
-    constructor(viewer, data, assets) {
+    constructor(viewer, data, assets, { onWarning } = {}) {
         this.assets = assets
+        this._onWarning = onWarning
         if (!w3d || typeof w3d.WaterFloodSimulation !== 'function') {
             throw new Error('runtime.w3d.WaterFloodSimulation is required')
         }
@@ -185,7 +173,7 @@ export class W3dWaterSurfaceLayer {
         this._uInterpolated = new Float32Array(this._textureLength)
         this._vInterpolated = new Float32Array(this._textureLength)
 
-        this._tidalTurbidityEnabled = data.tidalEnabled
+        this._tidalTurbidityEnabled = data.tidalAvailable === true
         this._tidalMix = new TidalWaterMix(data, this._textureLength)
         this._flow = new FlowDisplacement(data.nNodes, this._textureLength)
         this._shoreline = new ShorelineDistance(data)
@@ -239,7 +227,6 @@ export class W3dWaterSurfaceLayer {
     }
 
     _initializeEngine() {
-        installWebMercatorProjection()
         const vertices = new Array(this.data.nNodes)
         for (let index = 0; index < this.data.nNodes; index++) {
             vertices[index] = [this.data.lon[index], this.data.lat[index], 0]
@@ -500,6 +487,12 @@ export class W3dWaterSurfaceLayer {
         this._applyPalette()
     }
 
+    _warnAsset(asset, url, error) {
+        const warning = { code: 'ASSET_LOAD_FAILED', message: `资源加载失败：${asset}`, detail: { asset, url: assetUrl(url) } }
+        if (this._onWarning) this._onWarning(warning)
+        else console.warn(warning.message, error ?? warning.detail.url)
+    }
+
     _loadEstuaryNormals(material) {
         const context = this.viewer.scene.context
         const flat = new SuperMap3D.Texture({
@@ -529,11 +522,11 @@ export class W3dWaterSurfaceLayer {
                     this.viewer.scene.requestRender?.()
                     resolve(true)
                 } catch (error) {
-                    console.warn('Estuary normal texture could not initialize', error)
+                    this._warnAsset(`normals${index}`, this.assets.normals[index], error)
                     resolve(false)
                 }
             }
-            image.onerror = () => { console.warn('Estuary normal texture could not load', image.src); resolve(false) }
+            image.onerror = () => { this._warnAsset(`normals${index}`, this.assets.normals[index]); resolve(false) }
             image.crossOrigin = 'anonymous'
             image.src = this.assets.normals[index]
         })))

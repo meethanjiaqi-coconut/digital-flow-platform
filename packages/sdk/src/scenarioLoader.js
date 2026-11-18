@@ -10,7 +10,7 @@ function rendererContext(ctx, data) {
     options: structuredClone(ctx.options),
     profile: ctx.profile,
     onTick: ctx.tick,
-    onWarning: w => warn(ctx, w?.code ?? 'FLOW_WARNING', w?.message ?? '渲染警告', w?.detail),
+    onWarning: w => { warn(ctx, w?.code ?? 'FLOW_WARNING', w?.message ?? '渲染警告', w?.detail); notify(ctx) },
     onError: flowError => {
       const error = isFlowError(flowError) ? flowError : toFlowError(flowError, 'renderer', 'RUNTIME_BUSY')
       if (error?.name === 'AbortError' || ctx.destroyed) return

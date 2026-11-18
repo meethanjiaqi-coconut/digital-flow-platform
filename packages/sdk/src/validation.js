@@ -1,4 +1,5 @@
 import { FlowError } from './errors.js'
+import { WATER_QUALITY_OPTIONS } from './internal/waterQualityPresets.js'
 
 const invalid = (message, code = 'INVALID_MANIFEST') => { throw new FlowError(code, message) }
 
@@ -24,9 +25,9 @@ export function validateManifest(m) {
 }
 
 export const DEFAULT_OPTIONS = Object.freeze({
-  visible: true, flowStrength: 2, exaggeration: 60,
+  visible: true, flowStrength: 2, exaggeration: 60, quality: 'standard',
   particles: Object.freeze({visible: true, count: 16384, lineWidth: 1, trailSeconds: 1.5}),
-  water: Object.freeze({visible: true, colorMode: 'river', arrows: false, reflection: true, waveAmplitude: 0.14}),
+  water: Object.freeze({visible: true, colorMode: 'river', arrows: false, arrowScale: 24, palette: 'natural', qualityPreset: 'off', reflection: true, waveAmplitude: 0.14}),
   tidal: Object.freeze({marker: false, turbidity: true})
 })
 
@@ -60,5 +61,17 @@ export function mergeOptions(current, patch = {}) {
   range(result.exaggeration, 1, 200, '高程夸张')
   range(result.water.waveAmplitude, 0, .3, '微浪振幅')
   if (!['river','speed','level'].includes(result.water.colorMode)) invalidOption('无效的水面颜色模式')
+  if (!['low','standard'].includes(result.quality)) invalidOption('渲染质量必须是 low 或 standard')
+  range(result.water.arrowScale, 1, 80, '箭头缩放')
+  if (!['natural','tech'].includes(result.water.palette)) invalidOption('水面色板必须是 natural 或 tech')
+  if (!WATER_QUALITY_OPTIONS.some(option => option.value === result.water.qualityPreset)) invalidOption('水质视觉预设无效')
+  const waterPatch = isPlainObject(patch.water) ? patch.water : null
+  if (waterPatch) {
+    const presetOn = Object.hasOwn(waterPatch, 'qualityPreset') && result.water.qualityPreset !== 'off'
+    const themedMode = Object.hasOwn(waterPatch, 'colorMode') && result.water.colorMode !== 'river'
+    if (presetOn && themedMode) invalidOption('水质视觉预设与着色模式冲突：预设非关闭时 colorMode 必须为 river')
+    if (presetOn) result.water.colorMode = 'river'
+    if (themedMode) result.water.qualityPreset = 'off'
+  }
   return result
 }

@@ -105,12 +105,17 @@ export interface FlowProvider {
   querySeries?(manifest: Manifest, cell: number, context?: RequestContext): Promise<Series>
 }
 
+export type WaterQualityPreset = 'off' | 'I' | 'II' | 'III' | 'IV' | 'V' | 'BAD_V'
+export type WaterPalette = 'natural' | 'tech'
+export type RenderQuality = 'low' | 'standard'
+
 export interface FlowOptions {
   visible: boolean
   flowStrength: number
   exaggeration: number
+  quality: RenderQuality
   particles: { visible: boolean; count: 16384 | 65536 | 262144; lineWidth: number; trailSeconds: number }
-  water: { visible: boolean; colorMode: 'river' | 'speed' | 'level'; arrows: boolean; reflection: boolean; waveAmplitude: number }
+  water: { visible: boolean; colorMode: 'river' | 'speed' | 'level'; arrows: boolean; arrowScale: number; palette: WaterPalette; qualityPreset: WaterQualityPreset; reflection: boolean; waveAmplitude: number }
   tidal: { marker: boolean; turbidity: boolean }
 }
 export type FlowOptionsPatch = {
@@ -265,6 +270,8 @@ export interface FlowField {
 
 export declare const VERSION: string
 export declare const DEFAULT_OPTIONS: Readonly<FlowOptions>
+export declare const WATER_QUALITY_OPTIONS: readonly { label: string; value: WaterQualityPreset }[]
+export declare const COLOR_RAMPS: Readonly<{ level: string[]; speed: string[] }>
 export declare function createFlowField(config: FlowConfig): FlowField
 export declare function createHttpProvider(config: { baseUrl: string; request?: typeof fetch } & ProviderRequestOptions): FlowProvider
 export declare function createStaticProvider(config: { manifestUrl: string; request?: typeof fetch } & ProviderRequestOptions): FlowProvider

@@ -40,6 +40,8 @@ function harness(setup = {}) {
         setTime(...args) { live.times.push(args) },
         setOptions(o) { live.options = o },
         requestRender() { },
+        getCapabilities: setup.getCapabilities,
+        resetTrails() { live.resetTrails = (live.resetTrails || 0) + 1 },
         destroy() { live.destroys++ },
         pick() { return { lon: 120.07, lat: 30.02 } }
       }
@@ -340,6 +342,30 @@ test('渲染器 onError/onWarning 回调与 reinitialize 恢复', async () => {
   assert.equal(live.destroys, 1, 'reinitialize 应销毁旧会话一次')
   assert.equal(state.displayedFrame, displayedBefore)
   assert.ok(live.frames.length > framesBefore, '恢复画面应重新 setFrames')
+  flow.destroy()
+})
+
+test('渲染器 onWarning 后暂停状态下 statechange 反映粒子能力变化', async () => {
+  let particlesAvailable = true
+  const { flow, live } = harness({
+    getCapabilities: () => ({
+      water: { available: true },
+      particles: particlesAvailable ? { available: true } : { available: false, reason: 'GPU 能力不足' },
+      webgl2: true, maxTextureSize: 8192, floatRenderTarget: true, recommendedQuality: 'standard'
+    })
+  })
+  await flow.loadScenario()
+  flow.pause()
+  assert.equal(flow.getState().playing, false)
+  const states = []
+  flow.on('statechange', s => states.push(s))
+  const before = states.length
+  particlesAvailable = false
+  live.contexts[0].onWarning({ code: 'PARTICLES_UNSUPPORTED', message: '粒子流场不可用', detail: { reason: 'GPU 能力不足' } })
+  assert.ok(states.length > before, 'onWarning 后应补发 statechange')
+  const caps = states.at(-1).capabilities.renderer
+  assert.equal(caps?.particles?.available, false)
+  assert.equal(caps?.particles?.reason, 'GPU 能力不足')
   flow.destroy()
 })
 

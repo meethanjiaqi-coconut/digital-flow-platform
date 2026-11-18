@@ -26,7 +26,7 @@ async(page)=>{
     await page.evaluate(async()=>{await demoFlow.seek('2026-10-25T02:20:00+08:00');demoFlow.setOptions({tidal:{marker:true}})})
     await page.waitForTimeout(500)
     await page.screenshot({path:`output/playwright/${path.includes('vanilla')?'subdirectory':'vue'}-alpha.png`})
-    const state=await page.evaluate(()=>({state:demoFlow.getState(),gl:sdkDemo.viewer.scene.context._gl.getError()}))
+    const state=await page.evaluate(()=>({state:demoFlow.getState(),gl:sdkDemo.viewer.scene.context._gl.getError(),warnings:demoFlow.getDiagnostics().warnings}))
     results.push({path,errors,failed,initial:initial.status,playingAdvanced:after.displayedFrame>initial.displayedFrame,...state})
     page.off('pageerror',errorHandler);page.off('response',responseHandler)
     if(errors.length||failed.length||state.gl!==0)throw new Error('Example browser errors')
