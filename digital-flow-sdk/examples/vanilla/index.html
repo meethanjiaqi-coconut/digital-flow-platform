@@ -1,0 +1,20 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>数字流场 SDK · 原生接入</title>
+<link rel="icon" href="data:,"><link rel="stylesheet" href="../../local-assets/runtime/SuperMap3D/Widgets/widgets.css"><link rel="stylesheet" href="../style.css">
+<script type="importmap">{"imports":{"@digital-flow/sdk":"../../packages/sdk/dist/index.js","@digital-flow/sdk/supermap3d":"../../packages/sdk/dist/supermap3d.js","@digital-flow/sdk/tidal-estuary":"../../packages/sdk/dist/tidal-estuary.js"}}</script>
+<script src="../../local-assets/runtime/SuperMap3D/SuperMap3D.js"></script><script src="../../local-assets/runtime/w3d/w3d.umd.js"></script></head><body>
+<div id="map"></div><aside id="panel" class="panel"><h1>数字流场 · SDK 示例</h1><p id="status">正在加载 5 分钟流场…</p><p id="time">—</p>
+<div class="row"><button id="play" class="primary" disabled>播放</button><select id="rate" aria-label="播放速度"><option value="1">1 倍</option><option value="2">2 倍</option><option value="4">4 倍</option><option value="8">8 倍</option></select></div>
+<input id="timeline" type="range" min="0" max="1" value="0" step="1000" aria-label="时间进度" disabled>
+<h2>图层显示</h2><label class="row">动态水面<input id="water" type="checkbox" checked></label><label class="row">流向粒子<input id="particles" type="checkbox" checked></label>
+<label class="row">渲染质量<select id="quality"><option value="standard">标准</option><option value="low">流畅</option></select></label>
+<label class="row">粒子数量<select id="count"><option value="16384">约 1.6 万</option><option value="65536">约 6.5 万</option><option value="262144">约 26 万</option></select></label>
+<label for="width">粒子宽度 <span id="widthValue">1</span> px</label><input id="width" type="range" min="0.5" max="5" step="0.1" value="1">
+<label for="trail">粒子拖尾 <span id="trailValue">1.5</span> 秒</label><input id="trail" type="range" min="0" max="3" step="0.1" value="1.5">
+<h2>水面表达</h2><label class="row">水面箭头<input id="arrows" type="checkbox"></label>
+<label for="arrowScale">箭头缩放 <span id="arrowScaleValue">24</span>×</label><input id="arrowScale" type="range" min="1" max="80" step="1" value="24">
+<label class="row">水色<select id="palette"><option value="natural">自然</option><option value="tech">科技</option></select></label>
+<label class="row">水质预设<select id="qualityPreset"></select></label>
+<label class="row">着色模式<select id="colorMode"><option value="river">自然水面</option><option value="speed">流速</option><option value="level">水位</option></select></label>
+<label for="exaggeration">高程夸张 <span id="exaggerationValue">60</span>×</label><input id="exaggeration" type="range" min="1" max="200" step="1" value="60">
+<label class="row">潮头清浊分界<input id="turbidity" type="checkbox" checked></label><label class="row">潮头标记<input id="marker" type="checkbox"></label><label class="row">岸边倒影<input id="reflection" type="checkbox" checked></label>
+<p class="note">清浊分界由流场推断，用于视觉示意。点击水面查看当前时刻水位、流速与方向。</p><p id="error" role="alert"></p><a href="../vue/">查看 Vue + TDesign 接入示例 →</a></aside><div id="query">点击水面查询</div><script type="module" src="./main.js"></script></body></html>

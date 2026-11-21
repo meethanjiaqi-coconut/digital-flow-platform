@@ -1,0 +1,9 @@
+{
+  "name":"@digital-flow/vue-tdesign", "version":"0.1.0-alpha.2",
+  "description":"Optional Vue 3 and TDesign controls for Digital Flow SDK",
+  "type":"module", "license":"UNLICENSED", "sideEffects":["*.css"],
+  "files":["dist","README.md"], "main":"./dist/index.js", "types":"./dist/index.d.ts",
+  "exports":{".":{"types":"./dist/index.d.ts","import":"./dist/index.js"},"./style.css":"./dist/style.css"},
+  "peerDependencies":{"@digital-flow/sdk":"0.1.0-alpha.2","vue":"^3.5.0","tdesign-vue-next":"^1.20.5"},
+  "publishConfig":{"access":"restricted","tag":"alpha"}
+}

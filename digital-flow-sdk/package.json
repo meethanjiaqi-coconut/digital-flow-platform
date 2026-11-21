@@ -1,0 +1,28 @@
+{
+  "name": "digital-flow-sdk-workspace",
+  "version": "0.1.0-alpha.2",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "typecheck": "tsc",
+    "dev": "node scripts/serve-demo.mjs",
+    "verify:baseline": "node scripts/verify-baseline.mjs",
+    "verify:browser": "node scripts/browser-run.mjs --headless",
+    "pack:local": "node scripts/pack.mjs",
+    "verify:packages": "node scripts/verify-packages.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "tdesign-vue-next": "1.20.5",
+    "typescript": "5.9.3",
+    "vue": "3.5.29"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

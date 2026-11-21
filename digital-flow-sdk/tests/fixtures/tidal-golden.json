@@ -1,0 +1,53 @@
+{
+  "frames": {
+    "0": {
+      "candidates": "[]",
+      "memory": {
+        "sha256": "e75fab5db7967133e2afedddf99a850a41da6b3e9b478edb334772a9ecf33392"
+      },
+      "track": "{\"confidence\":0,\"distance\":0,\"segment\":0,\"status\":\"unavailable\"}"
+    },
+    "1": {
+      "candidates": "[{\"distance\":60322.32656957946,\"score\":2.706156177914938},{\"distance\":56981.87429474522,\"score\":1.5743441267087228},{\"distance\":17943.766968749973,\"score\":0.7365274326027897},{\"distance\":48322.979127783045,\"score\":0.3678643845283879},{\"distance\":9436.24098598701,\"score\":0.08721015535286218}]",
+      "memory": {
+        "sha256": "e75fab5db7967133e2afedddf99a850a41da6b3e9b478edb334772a9ecf33392"
+      },
+      "track": "{\"confidence\":0,\"distance\":0,\"rejected\":5,\"segment\":0,\"status\":\"reacquiring\"}"
+    },
+    "30": {
+      "candidates": "[{\"distance\":99963.01591649155,\"score\":1.2377677974494556},{\"distance\":80756.91503723839,\"score\":0.6119090401162016},{\"distance\":87150.85361309783,\"score\":0.09419942044357056}]",
+      "memory": {
+        "sha256": "065e46ef6c0f549abc684c93dc4587b35893643c6e41bc439dd858328b1a90c8"
+      },
+      "track": "{\"cell\":70554,\"confidence\":0.6227982035409021,\"depth\":1.9108825946077157,\"distance\":99963.01591649155,\"latitude\":30.268972396850586,\"longitude\":120.2429428100586,\"rejected\":2,\"score\":1.2377677974494556,\"seconds\":9000,\"segment\":1,\"speed\":0.1904706983844966,\"status\":\"tracked\",\"tangentX\":-0.9865230553433487,\"tangentY\":-0.16362231289168408,\"width\":800.9489170470043}"
+    },
+    "60": {
+      "candidates": "[{\"distance\":145981.70217385245,\"score\":0.16009194025487894},{\"distance\":131764.21253051862,\"score\":0.15605551194686887},{\"distance\":150420.73956849996,\"score\":0.09238174034684005}]",
+      "memory": {
+        "sha256": "06e81b630a75973c5a2a1db88aec92727bf82acab814ea2b0641350cb102ad24"
+      },
+      "track": "{\"cell\":71148,\"confidence\":0.4166287132624312,\"depth\":6.759018769710988,\"distance\":150420.73956849996,\"latitude\":30.039379119873047,\"longitude\":120.01168823242188,\"rejected\":2,\"score\":0.09238174034684005,\"seconds\":18000,\"segment\":3,\"speed\":0.11521472416030697,\"status\":\"tracked\",\"tangentX\":-0.9649183737637108,\"tangentY\":0.26255005612872334,\"width\":536.0358464924454}"
+    },
+    "100": {
+      "candidates": "[{\"distance\":11068.906357800068,\"score\":2.4700192572145836}]",
+      "memory": {
+        "sha256": "24c2bd49fd6b6e2fcb1d31cb3213b93260698f4c7e56c5bfd8ad68cd97380f15"
+      },
+      "track": "{\"cell\":68740,\"confidence\":0.844603466298625,\"depth\":4.027081091006815,\"distance\":11068.906357800068,\"latitude\":30.366168975830078,\"longitude\":120.89818572998047,\"rejected\":0,\"score\":2.4700192572145836,\"seconds\":30000,\"segment\":4,\"speed\":0.619357156365605,\"status\":\"tracked\",\"tangentX\":-0.9795819005094576,\"tangentY\":-0.20104551771745385,\"width\":2389.818167801873}"
+    },
+    "143": {
+      "candidates": "[{\"distance\":51230.70713722874,\"score\":2.352355958630298},{\"distance\":4246.037041417564,\"score\":1.2577473647624053},{\"distance\":43446.52309794559,\"score\":0.787171939219528},{\"distance\":7666.948343206369,\"score\":0.5728785092738082},{\"distance\":48324.90411049021,\"score\":0.393585969609764}]",
+      "memory": {
+        "sha256": "e04dab7656d1c3710da9b6b658a6c65ac20ce15946c87f519e8b53be43fced90"
+      },
+      "track": "{\"cell\":69873,\"confidence\":0.8234240725534536,\"depth\":1.6588432111025047,\"distance\":51230.70713722874,\"latitude\":30.397640228271484,\"longitude\":120.60501861572266,\"rejected\":4,\"score\":2.352355958630298,\"seconds\":42900,\"segment\":4,\"speed\":0.3944819108916507,\"status\":\"tracked\",\"tangentX\":-0.8711298671518293,\"tangentY\":0.49105270038564713,\"width\":1297.239369401938}"
+    }
+  },
+  "geometry": {
+    "activeCells": "87121304cf5a4c135bb575ea739e8ac2612281ca2c4b9938eb99fbcefe2192d1",
+    "riverDistance": "01e80a81a75cf3040add227484b8612660fbd291cfacafe50e86b65db96c3b87",
+    "upstreamX": "af9a5f48466ab81372eff8fd8e18577db1f7ee0d6bae98acdd379c26b98cd1fa",
+    "upstreamY": "a945f5f23e3540acfae4629302cd697066ed7c604d48c8b39a8d1ea0beb3bdfb",
+    "coordinates": "65631237528b9a505d41815429d45a68499738e14fdb153c2ed649d4a86d1df1"
+  }
+}

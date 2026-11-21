@@ -1,0 +1,65 @@
+async(page)=>{
+  const results=[]
+  for(const path of ['/sdk-demo/examples/vanilla/','/examples/vue/']){
+    const errors=[],failed=[]
+    const errorHandler=error=>errors.push(String(error))
+    const responseHandler=response=>{if(response.status()>=400&&response.url().includes('127.0.0.1'))failed.push({url:response.url(),status:response.status()})}
+    page.on('pageerror',errorHandler);page.on('response',responseHandler)
+    await page.goto('http://127.0.0.1:5185'+path)
+    await page.waitForFunction(()=>window.demoFlow?.getState().status==='ready')
+    const initial=await page.evaluate(()=>demoFlow.getState())
+    await page.getByRole('button',{name:'播放',exact:true}).click()
+    await page.waitForTimeout(1200)
+    await page.getByRole('button',{name:'暂停',exact:true}).click()
+    const after=await page.evaluate(()=>demoFlow.getState())
+    if(initial.playing||after.displayedFrame<=initial.displayedFrame)throw new Error('Playback control failed')
+    if(path.includes('vanilla')){
+      const trail=page.getByRole('slider',{name:/粒子拖尾/})
+      await trail.focus();await trail.press('End')
+      if((await page.evaluate(()=>demoFlow.getState().options.particles.trailSeconds))!==3)throw new Error('Trail control failed')
+    }else{
+      const checkbox=page.getByRole('switch').first()
+      await checkbox.click()
+      if((await page.evaluate(()=>demoFlow.getState().options.water.visible))!==false)throw new Error('Vue water toggle failed')
+      await checkbox.click()
+    }
+    await page.evaluate(async()=>{await demoFlow.seek('2026-10-25T02:20:00+08:00');demoFlow.setOptions({tidal:{marker:true}})})
+    await page.waitForTimeout(500)
+    await page.screenshot({path:`output/playwright/${path.includes('vanilla')?'subdirectory':'vue'}-alpha.png`})
+    if(path.includes('vue')){
+      await page.getByRole('button',{name:'下一时次'}).click()
+      await page.waitForTimeout(200)
+      if((await page.evaluate(()=>demoFlow.getState().displayedFrame))!==29)throw new Error('Timeline next step failed')
+      const rail=page.locator('.df-timeline__t-slider .t-slider__rail')
+      const thumb=page.locator('.df-timeline__t-slider .t-slider__button')
+      const box=await rail.boundingBox(), thumbBox=await thumb.boundingBox()
+      if(!box||!thumbBox)throw new Error('Timeline slider missing')
+      const beforeDragLabel=await page.locator('.df-timeline__labels strong').textContent()
+      await page.mouse.move(thumbBox.x+thumbBox.width/2,thumbBox.y+thumbBox.height/2)
+      await page.mouse.down()
+      await page.mouse.move(box.x+box.width*0.75,box.y+box.height/2,{steps:5})
+      await page.waitForTimeout(100)
+      const duringDragLabel=await page.locator('.df-timeline__labels strong').textContent()
+      if(duringDragLabel===beforeDragLabel)throw new Error('Timeline drag live preview did not update')
+      await page.mouse.up()
+      await page.waitForFunction(()=>!demoFlow.getState().buffering&&demoFlow.getState().displayedFrame>29,null,{timeout:15000})
+      await page.evaluate(()=>demoFlow.seek('2026-10-25T02:25:00+08:00'))
+      await page.getByText('流速着色').click()
+      await page.waitForSelector('.df-legend')
+      const clickPos=await page.evaluate(()=>{const v=sdkDemo.viewer,S=SuperMap3D;return S.SceneTransforms.wgs84ToWindowCoordinates(v.scene,S.Cartesian3.fromDegrees(120.56589,30.38797,0))})
+      if(!clickPos)throw new Error('Failed to project river coordinate to canvas')
+      await page.mouse.click(clickPos.x,clickPos.y)
+      await page.waitForSelector('.df-query-popup .df-mini-chart')
+      await page.screenshot({path:'output/playwright/vue-query-legend.png'})
+      await page.getByRole('button',{name:'关闭点位信息'}).click()
+      await page.getByRole('button',{name:'收起控制面板'}).click()
+      await page.getByRole('button',{name:'展开流场面板'}).click()
+    }
+    const state=await page.evaluate(()=>({state:demoFlow.getState(),gl:sdkDemo.viewer.scene.context._gl.getError(),warnings:demoFlow.getDiagnostics().warnings}))
+    results.push({path,errors,failed,initial:initial.status,playingAdvanced:after.displayedFrame>initial.displayedFrame,...state})
+    page.off('pageerror',errorHandler);page.off('response',responseHandler)
+    if(errors.length||failed.length||state.gl!==0)throw new Error('Example browser errors')
+  }
+  await page.evaluate(async results=>{window.exampleValidation=results;await fetch('/__test-evidence',{method:'POST',body:JSON.stringify({examples:results})})},results)
+  return results.map(r=>({path:r.path,passed:!r.errors.length&&!r.failed.length,gl:r.gl,frame:r.state.displayedFrame}))
+}
