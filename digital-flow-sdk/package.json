@@ -20,7 +20,7 @@
     "esbuild": "0.28.2",
     "tdesign-vue-next": "1.20.5",
     "typescript": "5.9.3",
-    "vue": "3.5.29"
+    "vue": "3.5.46"
   },
   "engines": {
     "node": ">=22"

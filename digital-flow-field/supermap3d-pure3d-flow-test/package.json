@@ -10,6 +10,6 @@
         "serve": "node server/preview-server.mjs"
     },
     "devDependencies": {
-        "vite": "7.3.6"
+        "vite": "7.3.8"
     }
 }

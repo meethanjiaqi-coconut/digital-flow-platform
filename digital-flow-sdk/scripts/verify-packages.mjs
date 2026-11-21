@@ -4,7 +4,8 @@ import {resolve,join} from 'node:path'
 const directory=resolve('.tmp',`consumer-${Date.now()}`)
 await mkdir(directory,{recursive:true})
 const packages=JSON.parse(await readFile('artifacts/package-manifest.json','utf8'))
-const dependencies={vue:'3.5.29','tdesign-vue-next':'1.20.5'}
+const {devDependencies}=JSON.parse(await readFile('package.json','utf8'))
+const dependencies={vue:devDependencies.vue,'tdesign-vue-next':devDependencies['tdesign-vue-next']}
 for(const pkg of packages)dependencies[pkg.name]=`file:${resolve('artifacts',pkg.filename).replaceAll('\\','/')}`
 await writeFile(join(directory,'package.json'),JSON.stringify({name:'sdk-clean-consumer',private:true,type:'module',dependencies},null,2))
 execFileSync(process.execPath,[process.env.npm_execpath,'install','--offline','--ignore-scripts','--no-audit','--no-fund'],{cwd:directory,stdio:'inherit'})
