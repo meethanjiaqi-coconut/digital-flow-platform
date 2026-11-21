@@ -1,8 +1,8 @@
 /* global SuperMap3D */
 /**
  * 数据驱动水面:静态网格几何 + 双帧顶点数据(level,u,v,wet)shader 插值。
- * 顶点级 Gerstner 三波(沿实际流向传播,幅随流速)+ 流向 flow-mapping 法线扰动、
- * 菲涅尔、太阳高光、干湿渐隐与泡沫;支持流速着色 / 水位云图两种模式。
+ * 顶点级 Gerstner 三波(沿实际流向传播,幅随流速)+ 多尺度 flow-mapping 法线扰动、
+ * 菲涅尔、太阳高光、浅水焦散、干湿渐隐与方向性泡沫;支持流速着色 / 水位云图两种模式。
  * 以自定义 DrawCommand 实现(SuperMap3D 暴露 Cesium 渲染内部类)。
  */
 import { generateWaterNormalCanvas } from './waterNormalTexture'
@@ -83,23 +83,41 @@ varying vec2 v_gerst;
 varying float v_depth;
 varying float v_crest;
 uniform sampler2D u_normalMap;
+uniform sampler2D u_detailNormalMap;
 uniform float u_speedMax;
 uniform float u_time;
 uniform float u_palette;
 uniform float u_colorMode;  // 0=流速着色 1=水位云图
 uniform vec2 u_levelRange;  // [min, max] m
+
+float causticPattern(vec2 uv, float time) {
+    // 三组移动波纹形成浅水焦散，不增加额外渲染通道。
+    vec2 p = uv * 2.4;
+    float a = sin(p.x * 6.283 + sin(p.y * 4.7 - time * 0.75) + time * 0.55);
+    float b = sin(p.y * 7.1 + sin(p.x * 3.9 + time * 0.62) - time * 0.48);
+    float c = sin((p.x + p.y) * 4.6 - time * 0.83);
+    float ridge = 1.0 - abs((a + b + c) / 3.0);
+    return pow(clamp(ridge, 0.0, 1.0), 5.0);
+}
+
 void main() {
     if (v_wet < 0.22) discard;
     float spd = v_spd;
     vec2 flowDir = spd > 0.001 ? normalize(v_flow) : vec2(1.0, 0.0);
-    float cycle = u_time * (0.25 + spd * 0.55);
+    vec2 flowSide = vec2(-flowDir.y, flowDir.x);
+    float cycle = u_time * (0.055 + min(spd, 3.0) * 0.045);
     float phase0 = fract(cycle);
     float phase1 = fract(cycle + 0.5);
-    vec2 drift = flowDir * 0.42;
-    vec3 n1 = texture2D(u_normalMap, v_uv - drift * phase0).xyz * 2.0 - 1.0;
-    vec3 n2 = texture2D(u_normalMap, v_uv * 1.19 + vec2(0.35) - drift * phase1).xyz * 2.0 - 1.0;
+    vec2 drift = flowDir * 0.62;
+    // 大中小三层法线：两层随真实流向平流，一层横向打散规则纹理。
+    vec3 n1 = texture2D(u_detailNormalMap, v_uv * 0.72 - drift * phase0).xyz * 2.0 - 1.0;
+    vec3 n2 = texture2D(u_detailNormalMap, v_uv * 1.47 + vec2(0.31, 0.17) - drift * phase1).xyz * 2.0 - 1.0;
     float blendPh = abs(phase0 * 2.0 - 1.0);
-    vec3 nTS = mix(n1, n2, blendPh);
+    vec3 n3 = texture2D(
+        u_normalMap,
+        v_uv * 3.2 + flowSide * 0.19 - flowDir * u_time * (0.025 + spd * 0.012)
+    ).xyz * 2.0 - 1.0;
+    vec3 nTS = normalize(mix(n1, n2, blendPh) + n3 * 0.28);
     nTS.xy += v_gerst * 1.6; // Gerstner 大波坡度并入法线
     // 远景衰减法线扰动:抑制高光闪烁与贴图平铺感
     float normFade = clamp(1.0 - (length(v_posEC) - 30000.0) / 250000.0, 0.15, 1.0);
@@ -110,8 +128,9 @@ void main() {
     vec3 B = cross(N, T);
     vec3 normalEC = normalize(T * nTS.x + B * nTS.y + N * nTS.z);
     vec3 viewDir = normalize(-v_posEC);
-    float fresnel = pow(1.0 - max(dot(viewDir, normalEC), 0.0), 3.0);
-    fresnel = mix(0.04, 0.55, fresnel);
+    float noV = max(dot(viewDir, normalEC), 0.0);
+    // Schlick 菲涅尔，正视水面保持透明，掠射角强化天空反射。
+    float fresnel = 0.025 + 0.72 * pow(1.0 - noV, 5.0);
     float sn = clamp(spd / u_speedMax, 0.0, 1.0);
     vec3 waterColor;
     if (u_colorMode > 0.5) {
@@ -127,34 +146,60 @@ void main() {
         waterColor = mix(waterColor, c4, smoothstep(0.5, 0.75, tL));
         waterColor = mix(waterColor, c5, smoothstep(0.75, 1.0, tL));
     } else {
-        vec3 deep = mix(vec3(0.015, 0.09, 0.18), vec3(0.0, 0.06, 0.22), u_palette);
-        vec3 mid  = mix(vec3(0.05, 0.32, 0.42), vec3(0.0, 0.42, 0.72), u_palette);
-        vec3 fast = mix(vec3(0.5, 0.83, 0.88), vec3(0.15, 0.9, 1.0), u_palette);
+        vec3 deep = mix(vec3(0.012, 0.075, 0.14), vec3(0.0, 0.045, 0.18), u_palette);
+        vec3 mid  = mix(vec3(0.035, 0.29, 0.36), vec3(0.0, 0.36, 0.68), u_palette);
+        vec3 fast = mix(vec3(0.42, 0.78, 0.78), vec3(0.1, 0.82, 1.0), u_palette);
         waterColor = mix(deep, mid, smoothstep(0.0, 0.45, sn));
         waterColor = mix(waterColor, fast, smoothstep(0.45, 1.0, sn));
-        // 水深着色:潮滩浅水偏黄绿透亮,深槽深邃
-        vec3 shallowCol = mix(vec3(0.24, 0.43, 0.36), vec3(0.1, 0.48, 0.52), u_palette);
-        waterColor = mix(shallowCol, waterColor * 0.88, smoothstep(0.0, 12.0, v_depth));
+        // 指数吸收近似：潮滩浅水透亮，深槽逐步吸收红绿光。
+        vec3 shallowCol = mix(vec3(0.2, 0.43, 0.36), vec3(0.07, 0.43, 0.52), u_palette);
+        float depthAbsorption = 1.0 - exp(-max(v_depth, 0.0) * 0.11);
+        waterColor = mix(shallowCol, waterColor * 0.84, depthAbsorption);
     }
-    vec3 sky = mix(vec3(0.34, 0.48, 0.63), vec3(0.08, 0.24, 0.45), u_palette);
+    float horizon = pow(1.0 - noV, 2.0);
+    vec3 skyZenith = mix(vec3(0.08, 0.2, 0.34), vec3(0.035, 0.16, 0.38), u_palette);
+    vec3 skyHorizon = mix(vec3(0.58, 0.69, 0.75), vec3(0.2, 0.52, 0.76), u_palette);
+    vec3 sky = mix(skyZenith, skyHorizon, horizon);
     vec3 L = normalize(czm_sunDirectionEC);
     vec3 H = normalize(L + viewDir);
     float ndh = max(dot(normalEC, H), 0.0);
-    float spec = (pow(ndh, 240.0) * 0.9 + pow(ndh, 36.0) * 0.08) * mix(0.25, 1.0, normFade);
+    float glintNoise = texture2D(u_normalMap, v_uv * 4.8 - flowDir * u_time * 0.04).a;
+    float sunFacing = max(dot(normalEC, L), 0.0);
+    float spec = (
+        pow(ndh, 260.0) * mix(0.45, 1.35, glintNoise) +
+        pow(ndh, 42.0) * 0.12
+    ) * mix(0.25, 1.0, normFade) * smoothstep(0.0, 0.18, sunFacing);
     // 云图模式弱化反射与高光,保证色彩可读
     float skyMix = fresnel * (u_colorMode > 0.5 ? 0.3 : 1.0);
     float specMix = u_colorMode > 0.5 ? 0.35 : 1.0;
     vec3 color = mix(waterColor, sky, skyMix);
     color += vec3(1.0, 0.96, 0.82) * spec * specMix;
-    float noise = texture2D(u_normalMap, v_uv * 2.3 + flowDir * phase0 * 0.25).a;
+    // 浅水焦散只调制自然水色；水位云图保持数值可读性。
+    float causticMask = (1.0 - smoothstep(0.25, 7.0, v_depth)) * (1.0 - fresnel);
+    float caustic = causticPattern(v_uv * 1.7 + flowDir * u_time * 0.018, u_time);
+    color += mix(vec3(0.18, 0.27, 0.18), vec3(0.05, 0.3, 0.34), u_palette)
+        * caustic * causticMask * (u_colorMode > 0.5 ? 0.04 : 0.32);
+
+    // 将噪声坐标旋转到真实流向，形成随 U/V 运动的条带白浪。
+    vec2 flowUv = vec2(dot(v_uv, flowDir), dot(v_uv, flowSide));
+    float noise = texture2D(
+        u_normalMap,
+        flowUv * vec2(0.82, 3.4) - vec2(u_time * (0.035 + spd * 0.025), 0.0)
+    ).a;
+    float detailNoise = texture2D(u_normalMap, v_uv * 5.1 + flowSide * u_time * 0.012).a;
     float foamBand = smoothstep(0.22, 0.42, v_wet) * (1.0 - smoothstep(0.42, 0.8, v_wet));
-    float foam = foamBand * smoothstep(0.35, 0.7, noise) * 1.1
-               + smoothstep(2.2, 3.2, spd) * smoothstep(0.45, 0.85, noise) * 0.5
-               + smoothstep(0.6, 0.95, v_crest) * smoothstep(1.2, 2.2, spd) * smoothstep(0.4, 0.75, noise) * 0.6;
-    color = mix(color, vec3(0.93, 0.97, 1.0), clamp(foam, 0.0, 0.85));
+    float shoreline = (1.0 - smoothstep(0.12, 1.6, v_depth)) * smoothstep(0.3, 0.72, v_wet);
+    float shoreFoam = max(foamBand, shoreline * 0.72) * smoothstep(0.4, 0.76, noise) * (0.65 + detailNoise * 0.45);
+    float shearFoam = smoothstep(0.65, 2.7, spd) * smoothstep(0.56, 0.82, noise) * 0.38;
+    float crestFoam = smoothstep(0.5, 0.96, v_crest) * smoothstep(0.75, 2.1, spd)
+        * smoothstep(0.42, 0.72, detailNoise) * 0.62;
+    float foam = (shoreFoam + shearFoam + crestFoam) * (u_colorMode > 0.5 ? 0.28 : 1.0);
+    vec3 foamColor = mix(vec3(0.88, 0.95, 0.94), vec3(0.78, 0.94, 1.0), u_palette);
+    color = mix(color, foamColor, clamp(foam, 0.0, 0.88));
     float alpha = u_colorMode > 0.5
         ? 0.82 + sn * 0.05
-        : (0.62 + fresnel * 0.28 + sn * 0.1) * mix(0.72, 1.0, smoothstep(0.0, 8.0, v_depth));
+        : (0.56 + fresnel * 0.34 + sn * 0.08) * mix(0.67, 1.0, smoothstep(0.0, 9.0, v_depth));
+    alpha = max(alpha, foam * 0.86);
     alpha *= smoothstep(0.22, 0.55, v_wet);
     gl_FragColor = vec4(color, clamp(alpha, 0.0, 0.94));
 }
@@ -182,6 +227,7 @@ export class WaterSurfacePrimitive {
         this._pendingB = null
         this._destroyed = false
         this._command = null
+        this._detailNormalImage = null
     }
 
     setFrames(a, b) {
@@ -247,17 +293,21 @@ export class WaterSurfacePrimitive {
             fragmentShaderSource: FS,
             attributeLocations
         })
+        const waterSampler = new S.Sampler({
+            wrapS: S.TextureWrap.REPEAT,
+            wrapT: S.TextureWrap.REPEAT,
+            minificationFilter: S.TextureMinificationFilter.LINEAR_MIPMAP_LINEAR,
+            magnificationFilter: S.TextureMagnificationFilter.LINEAR
+        })
         this._normalTexture = new S.Texture({
             context,
             source: generateWaterNormalCanvas(256),
-            sampler: new S.Sampler({
-                wrapS: S.TextureWrap.REPEAT,
-                wrapT: S.TextureWrap.REPEAT,
-                minificationFilter: S.TextureMinificationFilter.LINEAR_MIPMAP_LINEAR,
-                magnificationFilter: S.TextureMagnificationFilter.LINEAR
-            })
+            sampler: waterSampler
         })
         this._normalTexture.generateMipmap()
+        // 先使用程序纹理保证首帧立即可渲染，再异步换成 SuperMap 游戏水面同源细节法线。
+        this._detailNormalTexture = null
+        this._loadDetailNormalTexture(context, waterSampler)
         this._rs = S.RenderState.fromCache({
             depthTest: { enabled: true },
             depthMask: false,
@@ -291,9 +341,40 @@ export class WaterSurfacePrimitive {
                 u_levelRange: () => self._levelRange,
                 u_speedMax: () => self._speedMax,
                 u_centerWorld: () => self._center,
-                u_normalMap: () => self._normalTexture
+                u_normalMap: () => self._normalTexture,
+                u_detailNormalMap: () => self._detailNormalTexture || self._normalTexture
             }
         })
+    }
+
+    _loadDetailNormalTexture(context, sampler) {
+        const image = new Image()
+        this._detailNormalImage = image
+        image.decoding = 'async'
+        image.onload = () => {
+            if (this._destroyed || this._detailNormalImage !== image) return
+            try {
+                const texture = new SuperMap3D.Texture({ context, source: image, sampler })
+                texture.generateMipmap()
+                if (this._destroyed) {
+                    texture.destroy()
+                    return
+                }
+                this._detailNormalTexture = texture
+                this._detailNormalImage = null
+                image.onload = null
+                image.onerror = null
+            } catch (error) {
+                // 纹理加载失败时继续使用程序生成的法线，不影响流场主体渲染。
+                this._detailNormalImage = null
+                console.warn('[WaterSurfacePrimitive] 水面细节纹理初始化失败，已使用程序纹理回退:', error)
+            }
+        }
+        image.onerror = () => {
+            this._detailNormalImage = null
+            if (!this._destroyed) console.warn('[WaterSurfacePrimitive] 水面细节纹理加载失败，已使用程序纹理回退')
+        }
+        image.src = `${import.meta.env.BASE_URL}libs/SuperMap3D/Assets/Textures/waterNormalsSmall.jpg`
     }
 
     update(frameState) {
@@ -315,9 +396,15 @@ export class WaterSurfacePrimitive {
 
     destroy() {
         this._destroyed = true
+        if (this._detailNormalImage) {
+            this._detailNormalImage.onload = null
+            this._detailNormalImage.onerror = null
+            this._detailNormalImage = null
+        }
         this._va = this._va && this._va.destroy()
         this._sp = undefined // fromCache 由缓存管理
         this._normalTexture = this._normalTexture && this._normalTexture.destroy()
+        this._detailNormalTexture = this._detailNormalTexture && this._detailNormalTexture.destroy()
         this._command = null
         return undefined
     }

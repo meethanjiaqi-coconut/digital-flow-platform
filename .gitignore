@@ -1,4 +1,11 @@
 node_modules/
 dist/
+.tmp/
+.playwright-cli/
+.claude-flow/
+flow-field-service/target/
+output/
+__pycache__/
+*.pyc
 *.DAT
 tdesign/public/data/flowfield/*.bin

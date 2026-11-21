@@ -1,0 +1,41 @@
+server:
+  port: ${SERVER_PORT:8793}
+  servlet:
+    context-path: /flow-field
+
+spring:
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: ${PG_URL}
+    username: ${PG_USER}
+    password: ${PG_PASSWORD}
+    hikari:
+      maximum-pool-size: ${PG_POOL_SIZE:10}
+    initialization-mode: always
+    schema:
+      - classpath:db/flow_field.sql
+  servlet:
+    multipart:
+      enabled: false
+
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+flow-field:
+  storage-root: ${FLOW_STORAGE_ROOT:/data/flow-field}
+  publish-token: ${FLOW_PUBLISH_TOKEN:}
+  retain-scenarios: ${FLOW_RETAIN_SCENARIOS:100}
+  staging-hours: ${FLOW_STAGING_HOURS:72}
+  io-core-threads: ${FLOW_IO_CORE_THREADS:4}
+  io-max-threads: ${FLOW_IO_MAX_THREADS:8}
+  io-queue-capacity: ${FLOW_IO_QUEUE_CAPACITY:64}
+  cache-scenarios: ${FLOW_CACHE_SCENARIOS:2}

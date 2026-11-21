@@ -1,8 +1,9 @@
 <template>
     <map-viewer @init="initView"> </map-viewer>
     <router-view />
-    <div style="position:absolute;right: 10px;top: 10px;">
-        <t-button @click="handleSwitch">二三维切换</t-button>
+    <div class="flow-basemap-credit">影像 © Esri 及其数据提供方</div>
+    <div style="position:absolute;right: 12px;top: 166px;z-index:8901">
+        <t-button title="二三维切换" size="small" style="width:40px;padding:0" @click="handleSwitch">2D/3D</t-button>
     </div>
 </template>
 
@@ -28,16 +29,17 @@ function initView(sync) {
     sync.viewer.compass.enabled = true
     sync.viewer.zoomController.enabled = true
     const map = sync.map
-    map.getView().setCenter([106.1, 31.5])
-    map.getView().setZoom(5)
+    map.getView().setCenter([120.65, 30.32])
+    map.getView().setZoom(9)
     /* 添加栅格瓦片 */
     const layer = new ol.layer.Tile({
         source: new ol.source.XYZ({
             projection: 'EPSG:3857',
-            url: 'https://gac-geo.googlecnapps.club/maps/vt?lyrs=s&x={x}&y={y}&z={z}'
+            url: window.FLOW_FIELD_BASEMAP_URL || 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
         })
     })
     map.addLayer(layer)
+    sync.enabled = true
 }
 
 function handleSwitch() {
@@ -46,4 +48,6 @@ function handleSwitch() {
 }
 </script>
 
-<style scoped></style>
+<style scoped>
+.flow-basemap-credit { position: absolute; right: 20px; bottom: 28px; z-index: 10; padding: 3px 6px; border-radius: 3px; background: rgba(0,0,0,.45); color: #fff; font-size: 10px; text-shadow: 0 1px 3px #000; pointer-events: none; }
+</style>

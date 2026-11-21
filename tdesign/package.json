@@ -5,6 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:demo": "vite --mode demo",
+    "build:demo": "vite build --mode demo",
+    "preview:demo": "vite preview --mode demo --host 127.0.0.1 --port 5175 --strictPort",
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --fix",

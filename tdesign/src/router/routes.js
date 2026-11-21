@@ -36,4 +36,10 @@ const frameOut = []
 
 const errorPage = []
 
-export default [...frameIn, ...frameOut, ...errorPage]
+const demoRoutes = [{
+    path: '/',
+    component: () => import('@/views/index.vue'),
+    children: [{ path: '', name: 'flow-field', component: () => import('@/views/flow-field.vue') }]
+}]
+
+export default import.meta.env.MODE === 'demo' ? demoRoutes : [...frameIn, ...frameOut, ...errorPage]

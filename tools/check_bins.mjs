@@ -9,7 +9,11 @@ const DIR = join(ROOT, 'tdesign', 'public', 'data', 'flowfield')
 const toAB = (b) => b.buffer.slice(b.byteOffset, b.byteOffset + b.byteLength)
 
 const meta = JSON.parse(readFileSync(join(DIR, 'meta.json'), 'utf8'))
-const data = new FlowFieldData(meta, toAB(readFileSync(join(DIR, 'mesh.bin'))), toAB(readFileSync(join(DIR, 'frames.bin'))))
+const data = FlowFieldData.fromLegacy(
+    meta,
+    toAB(readFileSync(join(DIR, 'mesh.bin'))),
+    toAB(readFileSync(join(DIR, 'frames.bin')))
+)
 
 let fails = 0
 const check = (name, cond) => {
@@ -38,7 +42,7 @@ for (let f = 0; f < data.nFrames; f += 7) {
 check('湿单元数值范围合理(|z1|<10m,|uv|<5m/s)', ok)
 
 // 节点聚合:抽查节点值介于邻接湿单元 min/max 之间
-const nf = data.nodeFrame(0)
+const nf = await data.nodeFrame(0)
 ok = true
 for (let n = 0; n < data.nNodes; n += 511) {
     const s0 = data._adjOffsets[n], e0 = data._adjOffsets[n + 1]

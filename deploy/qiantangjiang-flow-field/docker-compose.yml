@@ -1,0 +1,11 @@
+services:
+  sgxt-flow-field:
+    image: sgxt-flow-field:1.0.1
+    container_name: sgxt-flow-field
+    restart: unless-stopped
+    env_file:
+      - ./server.env
+    ports:
+      - "${FLOW_HOST_PORT:-8793}:8793"
+    volumes:
+      - "${FLOW_DATA_HOST_DIR}:/data/flow-field"

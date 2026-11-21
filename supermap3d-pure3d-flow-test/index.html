@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SuperMap3D 纯三维数字流场测试</title>
+        <link rel="stylesheet" href="./libs/SuperMap3D/Widgets/widgets.css" />
+        <script>
+            window.SUPERMAP3D_BASE_URL = new URL('./libs/SuperMap3D/', document.baseURI).href
+        </script>
+        <script src="./libs/SuperMap3D/SuperMap3D.js"></script>
+        <script>
+            window.Cesium = window.SuperMap3D
+        </script>
+        <script src="./libs/w3d/w3d.umd.js"></script>
+    </head>
+    <body>
+        <div id="viewer"></div>
+
+        <header class="topbar">
+            <div>
+                <div class="eyebrow">PURE 3D · DEPENDENCY ISOLATION</div>
+                <h1>SuperMap3D 数字流场测试</h1>
+            </div>
+            <div id="runtime-status" class="runtime-status">正在初始化</div>
+        </header>
+
+        <aside class="control-panel">
+            <div class="panel-title">流场控制</div>
+            <label class="control-row switch-row">
+                <span>W3D 水面</span>
+                <input id="toggle-water" type="checkbox" checked />
+            </label>
+            <label class="control-row switch-row">
+                <span>GPU 粒子</span>
+                <input id="toggle-particles" type="checkbox" checked />
+            </label>
+            <label class="control-row">
+                <span>着色方式</span>
+                <select id="color-mode">
+                    <option value="0">流速</option>
+                    <option value="1">水位</option>
+                    <option value="2">不着色</option>
+                </select>
+            </label>
+            <label class="control-row">
+                <span>水质效果</span>
+                <select id="water-quality">
+                    <option value="off">关闭</option>
+                    <option value="class1">Ⅰ类 · 清澈</option>
+                    <option value="class2">Ⅱ类 · 较清澈</option>
+                    <option value="class3">Ⅲ类 · 轻微浑浊</option>
+                    <option value="class4">Ⅳ类 · 浑浊</option>
+                    <option value="class5">Ⅴ类 · 重度浑浊</option>
+                    <option value="inferior5">劣Ⅴ类</option>
+                </select>
+            </label>
+            <label class="control-column">
+                <span>水位夸张 <strong id="exaggeration-label">60×</strong></span>
+                <input id="exaggeration" type="range" min="1" max="200" value="60" />
+            </label>
+            <button id="reset-camera" type="button">重置钱塘江视角</button>
+            <div class="dependency-badges">
+                <span>SuperMap3D</span>
+                <span>W3D</span>
+                <span>无 OL</span>
+                <span>无 Ex</span>
+            </div>
+        </aside>
+
+        <section class="timeline-panel">
+            <button id="toggle-play" type="button">暂停</button>
+            <select id="play-speed" aria-label="播放速度">
+                <option value="0.5">0.5×</option>
+                <option value="1">1×</option>
+                <option value="2" selected>2×</option>
+                <option value="4">4×</option>
+            </select>
+            <input id="timeline" type="range" min="0" max="71" step="0.01" value="0" />
+            <time id="current-time">--</time>
+        </section>
+
+        <div id="error-panel" class="error-panel" hidden></div>
+        <script type="module" src="/src/main.js"></script>
+    </body>
+</html>

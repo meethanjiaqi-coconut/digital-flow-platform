@@ -1,4 +1,36 @@
-/* global SuperMap3D */
+import { DEFAULT_FLOW_STRENGTH, normalizeFlowStrength } from './flowDynamics.js'
+// Particle baseline from .tmp/water-completion/ParticleFlowLayer.js, including
+// viewport-relative advection. Later full backups already used a slower,
+// world-space water scale and do not preserve the original convergence effect.
+// 1.5 seconds is the rounded time for 0.95 retention at 60 FPS to fade to 1%.
+export const DEFAULT_PARTICLE_SETTINGS = Object.freeze({
+    dimension: 128,
+    width: 1.0,
+    opacity: 0.65,
+    trailSeconds: 1.5,
+    fadeAt60Fps: 0.95,
+    speedFractionPerSecond: 0.045
+})
+export const DEFAULT_PARTICLE_TRAIL_SECONDS = DEFAULT_PARTICLE_SETTINGS.trailSeconds
+export const MAX_PARTICLE_TRAIL_SECONDS = 3
+
+export function normalizeParticleTrail(value) {
+    const seconds = Number(value)
+    return Number.isFinite(seconds) ? Math.max(0, Math.min(MAX_PARTICLE_TRAIL_SECONDS, seconds)) : DEFAULT_PARTICLE_TRAIL_SECONDS
+}
+
+export function particleTrailFade(seconds, dt) {
+    return seconds > 0 ? Math.pow(DEFAULT_PARTICLE_SETTINGS.fadeAt60Fps, Math.max(0, dt) * 60 * DEFAULT_PARTICLE_TRAIL_SECONDS / seconds) : 0
+}
+
+export function particleSpeedScale(longitudeSpan, strength = DEFAULT_FLOW_STRENGTH) {
+    if (!Number.isFinite(longitudeSpan) || longitudeSpan <= 0) return 0
+    // Restore the original screen-relative motion: at the default gain a 1 m/s
+    // meridional flow travels 4.5% of the longitude span per animation second.
+    // Only presentation is scaled; the sampled U/V values and colours are intact.
+    return longitudeSpan * DEFAULT_PARTICLE_SETTINGS.speedFractionPerSecond * normalizeFlowStrength(strength) / DEFAULT_FLOW_STRENGTH
+}
+/* global SuperMap3D, WebGL2RenderingContext */
 /**
  * Windy 风格 GPU 粒子流场层。
  * 每帧四段:①网格→视野流场纹理(r=u,g=v,b=wet,a=level) ②位置纹理 ping-pong 平流
@@ -38,6 +70,7 @@ uniform vec4 u_bbox;
 uniform float u_dt;
 uniform float u_speedScale; // deg per (m/s) per second
 uniform float u_frame;
+uniform bool u_reseed;
 varying vec2 v_st;
 float rand(float x) { return fract(sin(x * 12.9898) * 43758.5453); }
 void main() {
@@ -49,11 +82,13 @@ void main() {
     vec4 f = texture2D(u_field, fuv);
     bool outside = fuv.x < 0.0 || fuv.x > 1.0 || fuv.y < 0.0 || fuv.y > 1.0;
     float maxAge = 4.0 + fract(seed * 7.31) * 6.0;
-    if (outside || age > maxAge || f.b < 0.35) {
-        // 湿区拒绝采样:最多试 4 个随机点,取第一个湿点
+    if (u_reseed || outside || age > maxAge || f.b < 0.35) {
+        // Camera redistribution must fill the new wet area even while paused.
+        // Use more attempts for this one-off pass; normal births stay cheap.
         vec2 spawn = lonlat;
         float got = 0.0;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < 24; i++) {
+            if (!u_reseed && i >= 4) break;
             float fi = float(i);
             vec2 cand = u_bbox.xy + vec2(
                 rand(seed + u_frame * 0.0131 + v_st.x + fi * 0.317),
@@ -66,7 +101,7 @@ void main() {
             }
         }
         lonlat = spawn;
-        age = 0.0;
+        age = got > 0.5 ? 0.02 + (u_reseed ? rand(seed + v_st.y) * 3.0 : 0.0) : 0.0;
         seed = fract(seed + 0.61803398875);
     } else {
         float coslat = max(cos(radians(lonlat.y)), 0.2);
@@ -80,9 +115,14 @@ void main() {
 const FADE_FS = `
 uniform sampler2D u_trail;
 uniform float u_fade;
+uniform float u_fadePhase;
 varying vec2 v_st;
 void main() {
     vec4 c = texture2D(u_trail, v_st) * u_fade;
+    // Unbiased rounding keeps low RGBA8 values from rounding back to the same
+    // byte forever. The sub-byte dither changes only on animation steps.
+    float dither = fract(52.9829189 * fract(dot(gl_FragCoord.xy + u_fadePhase * vec2(17.0, 23.0), vec2(0.06711056, 0.00583715))));
+    c = floor(c * 255.0 + dither) / 255.0;
     gl_FragColor = vec4(c.rgb, c.a) * step(0.012, max(max(c.r, c.g), c.b));
 }
 `
@@ -99,11 +139,16 @@ uniform vec4 u_bbox;
 uniform float u_exagg;
 uniform vec2 u_viewport;
 uniform float u_width;   // 头部半宽(像素)
+uniform bool u_preview;
+uniform float u_previewSeconds;
+uniform float u_speedScale;
 uniform mat4 u_vp;       // 显式传入当前相机 投影×视图(手动 execute 时 czm_* 不可靠)
 uniform vec3 u_camPos;   // 相机世界坐标(地平线剔除)
 varying float v_speed;
 varying float v_end;
 varying float v_side;
+varying float v_lifeOpacity;
+varying vec2 v_fieldUV;
 const float A = 6378137.0;
 const float E2 = 0.00669437999014;
 vec3 toEcef(vec2 ll, float h) {
@@ -121,16 +166,33 @@ void main() {
     v_speed = length(f.rg);
     v_end = endFlag;
     v_side = side;
-    // 重生跳变/干区/新生:移出屏幕
-    if (distance(head.xy, tail.xy) > u_bbox.z * 0.02 || f.b < 0.35 || head.z < 0.016) {
+    // Seed changes on every birth. A distance threshold both joined nearby
+    // respawns into flashing streaks and rejected fast, valid motion on a slow
+    // frame. Never connect two different lives, regardless of their distance.
+    bool reborn = abs(head.w - tail.w) > 0.00001;
+    bool outside = any(lessThan(fuv, vec2(0.0))) || any(greaterThan(fuv, vec2(1.0)));
+    if ((!u_preview && reborn) || outside || f.b < 0.35 || head.z < 0.016) {
         gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
         return;
     }
+    float maxAge = 4.0 + fract(head.w * 7.31) * 6.0;
+    v_lifeOpacity = smoothstep(0.02, 0.18, head.z) * (1.0 - smoothstep(maxAge - 0.35, maxAge, head.z));
+    // A paused redraw previews the selected length from the current velocity;
+    // particle positions and the model/animation clocks remain frozen.
+    if (u_preview) {
+        vec2 offset = vec2(f.r / max(cos(radians(head.y)), 0.2), f.g) * u_speedScale * u_previewSeconds;
+        float extent = max(length(offset / u_bbox.zw), 0.000001);
+        tail.xy = head.xy - offset * min(1.0, 0.03 / extent);
+    }
+    v_fieldUV = ((endFlag > 0.5 ? head.xy : tail.xy) - u_bbox.xy) / u_bbox.zw;
     float h = f.a * u_exagg + 12.0;
     vec3 posH = toEcef(head.xy, h);
     // 椭球地平线剔除:域转到地球背面时不再穿透显示
-    vec3 cv = u_camPos / A;
-    vec3 tv = posH / A - cv;
+    // Scale by all three ellipsoid radii. Treating Earth as a sphere with its
+    // equatorial radius incorrectly puts low-altitude cameras inside it here.
+    vec3 radii = vec3(A, A, A * sqrt(1.0 - E2));
+    vec3 cv = u_camPos / radii;
+    vec3 tv = posH / radii - cv;
     float vhMag2 = dot(cv, cv) - 1.0;
     float dd = dot(-cv, tv);
     if (dd > vhMag2 && dd * dd / dot(tv, tv) > vhMag2) {
@@ -155,13 +217,17 @@ void main() {
 const RIBBON_FS = `
 uniform sampler2D u_ramp;
 uniform float u_speedMax;
+uniform sampler2D u_field;
 varying float v_speed;
 varying float v_end;
 varying float v_side;
+varying float v_lifeOpacity;
+varying vec2 v_fieldUV;
 void main() {
+    if (any(lessThan(v_fieldUV, vec2(0.0))) || any(greaterThan(v_fieldUV, vec2(1.0))) || texture2D(u_field, v_fieldUV).b < 0.35) discard;
     vec3 c = texture2D(u_ramp, vec2(clamp(v_speed / u_speedMax, 0.02, 0.98), 0.5)).rgb;
     float edge = 1.0 - abs(v_side);
-    float a = smoothstep(0.0, 0.55, edge) * mix(0.4, 1.0, v_end);
+    float a = smoothstep(0.0, 0.55, edge) * mix(0.4, 1.0, v_end) * v_lifeOpacity;
     gl_FragColor = vec4(c * a, a);
 }
 `
@@ -182,11 +248,11 @@ function rampCanvas() {
     c.height = 1
     const ctx = c.getContext('2d')
     const g = ctx.createLinearGradient(0, 0, 256, 0)
-    g.addColorStop(0.0, '#12345f')
-    g.addColorStop(0.25, '#1e6fd9')
-    g.addColorStop(0.5, '#00c8ff')
-    g.addColorStop(0.75, '#7df3ff')
-    g.addColorStop(1.0, '#ffffff')
+    g.addColorStop(0.0, '#137e88')
+    g.addColorStop(0.25, '#18a7a1')
+    g.addColorStop(0.5, '#63b790')
+    g.addColorStop(0.75, '#b9bf64')
+    g.addColorStop(1.0, '#dbc34d')
     ctx.fillStyle = g
     ctx.fillRect(0, 0, 256, 1)
     return c
@@ -209,18 +275,22 @@ export class ParticleFlowLayer {
         this.show = true
         this._t = 0
         this._exagg = 60
-        this._dim = 256 // 粒子纹理边长
+        this._dim = DEFAULT_PARTICLE_SETTINGS.dimension
         this._fieldW = 2048
         this._fieldH = 1024
-        this._fade = 0.965
-        this._opacity = 1.0
-        this._width = 1.5 // 条带头部半宽(像素)
+        this._trailSeconds = DEFAULT_PARTICLE_TRAIL_SECONDS
+        this._opacity = DEFAULT_PARTICLE_SETTINGS.opacity
+        this._width = DEFAULT_PARTICLE_SETTINGS.width // 条带头部半宽(像素)
         this._speedMax = (data.meta && data.meta.stats && data.meta.stats.speedMax) || 2.5
         this._pendingA = null
         this._pendingB = null
         this._bbox = null // [xmin,ymin,xspan,yspan]
         this._frame = 0
-        this._lastNow = undefined
+        this._animationTime = 0
+        this._flowStrength = DEFAULT_FLOW_STRENGTH
+        this._renderedAnimationTime = 0
+        this._renderDirty = true
+        this._fieldDirty = true
         this._destroyed = false
         this._ready = false
     }
@@ -230,17 +300,51 @@ export class ParticleFlowLayer {
         this._pendingB = b
     }
     setT(t) {
+        if (this._t !== t) {
+            this._renderDirty = true
+            this._fieldDirty = true
+        }
         this._t = t
+    }
+    setFlowStrength(value) {
+        this._flowStrength = normalizeFlowStrength(value)
+        return this._flowStrength
+    }
+
+    setAnimationTime(seconds) {
+        this._animationTime = seconds
     }
     setExaggeration(e) {
         this._exagg = e
+        this._renderDirty = true
     }
     setCount(dim) {
         this._dim = dim
         this._rebuildParticles = true
+        this._clearTrails = true
+        this._renderDirty = true
     }
     setWidth(px) {
         this._width = px
+        this._clearTrails = true
+        this._renderDirty = true
+    }
+    get trailDuration() {
+        return this._trailSeconds
+    }
+    setTrailDuration(seconds) {
+        this._trailSeconds = normalizeParticleTrail(seconds)
+        this._clearTrails = true
+        this._renderDirty = true
+        this.viewer.scene.requestRender?.()
+        return this._trailSeconds
+    }
+
+    resetStyle() {
+        this.setCount(DEFAULT_PARTICLE_SETTINGS.dimension)
+        this.setWidth(DEFAULT_PARTICLE_SETTINGS.width)
+        this._opacity = DEFAULT_PARTICLE_SETTINGS.opacity
+        this.setTrailDuration(DEFAULT_PARTICLE_TRAIL_SECONDS)
     }
 
     // ---------------------------------------------------------- resources
@@ -352,6 +456,7 @@ export class ParticleFlowLayer {
         this._posFBA = new S.Framebuffer({ context, colorTextures: [this._posTexA], destroyAttachments: false })
         this._posFBB = new S.Framebuffer({ context, colorTextures: [this._posTexB], destroyAttachments: false })
         this._pingIsA = true
+        this._redistribute = true
 
         // 条带 VB:每粒子 4 顶点 [ref.x, ref.y, endFlag, side],索引 6/粒子
         const vb = new Float32Array(n * 4 * 4)
@@ -458,7 +563,7 @@ export class ParticleFlowLayer {
         let centerLon, centerLat, distM
         let picked = false
         if (S.IntersectionTests && S.IntersectionTests.rayEllipsoid && S.Ray) {
-            const ray = new S.Ray(camera.position, camera.direction)
+            const ray = new S.Ray(camera.positionWC, camera.directionWC)
             const iv = S.IntersectionTests.rayEllipsoid(ray, ellipsoid)
             if (iv) {
                 const p = S.Ray.getPoint(ray, iv.start)
@@ -540,6 +645,12 @@ export class ParticleFlowLayer {
     update(frameState) {
         if (!this.show || this._destroyed) return
         if (!frameState.passes.render) return
+        // SuperMap renders a water mirror FBO before the main scene, with the
+        // same frame number and passes.render=true but a different camera view.
+        // This overlay belongs only to the main view. Letting the mirror pass
+        // consume dt / replace the screen history clears the trails twice per
+        // frame and leaves only short preview strokes (or dots).
+        if (frameState.fboEnable || frameState.passes.offscreen) return
         const S = SuperMap3D
         const context = frameState.context
         if (!this._ready) {
@@ -575,6 +686,8 @@ export class ParticleFlowLayer {
             }
         }
         if (this._pendingA) {
+            this._renderDirty = true
+            this._fieldDirty = true
             this._dataABuf.copyFromArrayView(this._pendingA)
             this._dataBBuf.copyFromArrayView(this._pendingB)
             this._pendingA = this._pendingB = null
@@ -589,7 +702,9 @@ export class ParticleFlowLayer {
             Math.abs(nb[3] - ob[3]) > ob[3] * 0.08
         if (moved) {
             this._bbox = nb
-            this._dissolve = 14 // 软消散:短时加速衰减代替硬清空
+            this._redistribute = true
+            this._clearTrails = true
+            this._renderDirty = true
         }
         if (context.drawingBufferWidth !== this._trailW || context.drawingBufferHeight !== this._trailH) {
             this._destroyTrails()
@@ -601,89 +716,110 @@ export class ParticleFlowLayer {
             this._createParticles(context)
         }
 
-        const now = performance.now()
-        const dt = this._lastNow === undefined ? 0.016 : Math.min((now - this._lastNow) / 1000, 0.1)
-        this._lastNow = now
-        this._frame++
+        const dt = Math.max(0, Math.min(this._animationTime - this._renderedAnimationTime, 0.1))
+        const advance = dt > 0
+        this._renderedAnimationTime = this._animationTime
+        if (advance) this._frame++
         // 显式取当前相机矩阵:手动 execute 时 czm_* 环境状态可能是上一 pass 的残留
         const cam = frameState.camera
         this._vp = S.Matrix4.multiply(cam.frustum.projectionMatrix, cam.viewMatrix, this._vp || new S.Matrix4())
         this._camPos = S.Cartesian3.clone(cam.positionWC, this._camPos || new S.Cartesian3())
+        const cameraChanged = !this._renderedVp || !S.Matrix4.equalsEpsilon(this._vp, this._renderedVp, 1e-8)
+        // Screen-space history belongs to the previous camera. Reusing it while
+        // zooming smears old pixels over newly visible land and water.
+        if (cameraChanged) this._clearTrails = true
+        const redraw = this._renderDirty || this._clearTrails || cameraChanged
+        this._renderedVp = S.Matrix4.clone(this._vp, this._renderedVp || new S.Matrix4())
         const bboxArr = this._bbox
         const bboxUniform = () => new S.Cartesian4(bboxArr[0], bboxArr[1], bboxArr[2], bboxArr[3])
-        const speedScale = bboxArr[2] * 0.045 // 1 m/s 每秒横跨视野约 4.5%
+        const speedScale = particleSpeedScale(bboxArr[2], this._flowStrength)
 
         try {
-            // ① 流场纹理
-            new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: this._fieldFB }).execute(context)
-            this._drawOffscreen(context, {
-                sp: this._fieldSP,
-                va: this._fieldVA,
-                fb: this._fieldFB,
-                rs: this._mkOffscreenRS(this._fieldW, this._fieldH),
-                uniformMap: { u_t: () => this._t, u_bbox: bboxUniform }
-            })
+            // 暂停时保留粒子位置与拖尾；仅在相机、时次或样式改变时重新投影。
+            if (advance || redraw) {
+                // ① 流场纹理
+                new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: this._fieldFB }).execute(context)
+                this._drawOffscreen(context, {
+                    sp: this._fieldSP,
+                    va: this._fieldVA,
+                    fb: this._fieldFB,
+                    rs: this._mkOffscreenRS(this._fieldW, this._fieldH),
+                    uniformMap: { u_t: () => this._t, u_bbox: bboxUniform }
+                })
 
-            // ② 粒子更新:prev -> curr
-            const prevTex = this._pingIsA ? this._posTexA : this._posTexB
-            const currFB = this._pingIsA ? this._posFBB : this._posFBA
-            const currTex = this._pingIsA ? this._posTexB : this._posTexA
-            this._drawOffscreen(context, {
-                sp: this._updateSP,
-                va: this._quadVA,
-                fb: currFB,
-                rs: this._mkOffscreenRS(this._dim, this._dim),
-                uniformMap: {
-                    u_particles: () => prevTex,
-                    u_field: () => this._fieldTex,
-                    u_bbox: bboxUniform,
-                    u_dt: () => dt,
-                    u_speedScale: () => speedScale,
-                    u_frame: () => this._frame % 1000
+                // ② 粒子更新:prev -> curr
+                let currTex = this._pingIsA ? this._posTexA : this._posTexB
+                let prevTex = this._pingIsA ? this._posTexB : this._posTexA
+                const reseed = Boolean(this._redistribute)
+                if (advance || reseed || this._fieldDirty) {
+                    prevTex = currTex
+                    const currFB = this._pingIsA ? this._posFBB : this._posFBA
+                    currTex = this._pingIsA ? this._posTexB : this._posTexA
+                    this._drawOffscreen(context, {
+                        sp: this._updateSP,
+                        va: this._quadVA,
+                        fb: currFB,
+                        rs: this._mkOffscreenRS(this._dim, this._dim),
+                        uniformMap: {
+                            u_particles: () => prevTex,
+                            u_field: () => this._fieldTex,
+                            u_bbox: bboxUniform,
+                            u_dt: () => dt,
+                            u_speedScale: () => speedScale,
+                            u_frame: () => this._frame % 1000,
+                            u_reseed: () => reseed
+                        }
+                    })
+                    this._pingIsA = !this._pingIsA
+                    this._redistribute = false
+                    if (reseed) prevTex = currTex
                 }
-            })
-            this._pingIsA = !this._pingIsA
 
-            // ③ 拖尾:prevTrail 衰减写入 currTrail,再叠加条带
-            const trailPrev = this._trailPingIsA ? this._trailA : this._trailB
-            const trailCurr = this._trailPingIsA ? this._trailB : this._trailA
-            if (this._clearTrails) {
-                this._clearTrails = false
-                for (const t of [this._trailA, this._trailB]) {
-                    new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: t.fb }).execute(context)
+                // ③ 拖尾:prevTrail 衰减写入 currTrail,再叠加条带
+                const trailPrev = this._trailPingIsA ? this._trailA : this._trailB
+                const trailCurr = this._trailPingIsA ? this._trailB : this._trailA
+                if (this._clearTrails || !advance) {
+                    this._clearTrails = false
+                    for (const t of [this._trailA, this._trailB]) {
+                        new S.ClearCommand({ color: new S.Color(0, 0, 0, 0), framebuffer: t.fb }).execute(context)
+                    }
                 }
+                const fadeNow = particleTrailFade(this._trailSeconds, dt)
+                this._drawOffscreen(context, {
+                    sp: this._fadeSP,
+                    va: this._quadVA,
+                    fb: trailCurr.fb,
+                    rs: this._mkOffscreenRS(this._trailW, this._trailH),
+                    uniformMap: { u_trail: () => trailPrev.tex, u_fade: () => fadeNow, u_fadePhase: () => this._frame % 1000 }
+                })
+                this._drawOffscreen(context, {
+                    sp: this._ribbonSP,
+                    va: this._ribbonVA,
+                    fb: trailCurr.fb,
+                    rs: this._mkOffscreenRS(this._trailW, this._trailH, ADD_BLEND),
+                    count: this._nRibbonIndices,
+                    primitiveType: S.PrimitiveType.TRIANGLES,
+                    uniformMap: {
+                        u_curr: () => currTex,
+                        u_prev: () => prevTex,
+                        u_field: () => this._fieldTex,
+                        u_bbox: bboxUniform,
+                        u_exagg: () => this._exagg,
+                        u_viewport: () => new S.Cartesian2(this._trailW, this._trailH),
+                        u_width: () => this._width,
+                        u_preview: () => !advance || reseed,
+                        u_previewSeconds: () => this._trailSeconds * 0.2,
+                        u_speedScale: () => speedScale,
+                        u_ramp: () => this._rampTex,
+                        u_vp: () => this._vp,
+                        u_camPos: () => this._camPos,
+                        u_speedMax: () => this._speedMax
+                    }
+                })
+                this._trailPingIsA = !this._trailPingIsA
+                this._renderDirty = false
+                this._fieldDirty = false
             }
-            const fadeNow = this._dissolve > 0 ? 0.72 : this._fade
-            if (this._dissolve > 0) this._dissolve--
-            this._drawOffscreen(context, {
-                sp: this._fadeSP,
-                va: this._quadVA,
-                fb: trailCurr.fb,
-                rs: this._mkOffscreenRS(this._trailW, this._trailH),
-                uniformMap: { u_trail: () => trailPrev.tex, u_fade: () => fadeNow }
-            })
-            this._drawOffscreen(context, {
-                sp: this._ribbonSP,
-                va: this._ribbonVA,
-                fb: trailCurr.fb,
-                rs: this._mkOffscreenRS(this._trailW, this._trailH, ADD_BLEND),
-                count: this._nRibbonIndices,
-                primitiveType: S.PrimitiveType.TRIANGLES,
-                uniformMap: {
-                    u_curr: () => currTex,
-                    u_prev: () => prevTex,
-                    u_field: () => this._fieldTex,
-                    u_bbox: bboxUniform,
-                    u_exagg: () => this._exagg,
-                    u_viewport: () => new S.Cartesian2(this._trailW, this._trailH),
-                    u_width: () => this._width,
-                    u_ramp: () => this._rampTex,
-                    u_vp: () => this._vp,
-                    u_camPos: () => this._camPos,
-                    u_speedMax: () => this._speedMax
-                }
-            })
-            this._trailPingIsA = !this._trailPingIsA
         } catch (e) {
             if (!this._runError) {
                 this._runError = true
