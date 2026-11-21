@@ -62,7 +62,7 @@ pnpm format
 
 `.env.demo` 和 `.env.development` 配置本地数据：`VITE_FLOW_LOCAL_PACKAGE=../output/flowfield-5min-verified`。
 优先提供 2026-10-25 00:00—11:55 的 144 个真实 5 分钟输出；同时保留 `public/data/flowfield/` 的原 72 帧逐时场次。
-新转换包和旧 `meta.json`、`mesh.bin`、`frames.bin` 均须存在。二进制未纳入 Git，迁移机器时需一并准备。
+私有仓库已包含五分钟转换包和逐时数据 `meta.json`、`mesh.bin`、`frames.bin`。克隆后可直接用启动脚本运行演示，首次启动会自动执行 `npm.cmd ci` 安装依赖。
 
 底图演示默认使用 Esri World Imagery，也可通过 `window.FLOW_FIELD_BASEMAP_URL` 配置兼容的 XYZ 服务。
 `npm.cmd run build:demo` 构建后，可用 `npm.cmd run preview:demo` 预览；单独部署 `dist` 仍需流场 API。

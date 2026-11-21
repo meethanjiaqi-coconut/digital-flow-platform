@@ -1,0 +1,3 @@
+/output/flowfield-5min-verified/** -text
+/tdesign/public/data/flowfield/*.bin binary
+*.cmd text eol=crlf

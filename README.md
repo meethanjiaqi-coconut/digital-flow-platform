@@ -9,9 +9,7 @@
 
 ## 换机运行演示
 
-安装依赖前，请先从原工作目录或项目维护方取得下列资源，放回对应位置。
+普通 Git 克隆包含两个示例所需的五分钟数据（144 帧）、原项目的逐时数据和 SDK 运行时。在 Windows 上安装 Node.js 24 LTS（含 npm）后，可直接启动。首次启动会安装依赖，请保持 npm 源可访问。卫星底图需要访问在线地图服务。
 
-- 流场演示使用 `digital-flow-field/output/flowfield-5min-verified/` 下的五分钟数据包，以及 `digital-flow-field/tdesign/public/data/flowfield/` 下的 `mesh.bin` 和 `frames.bin`。
-- SDK 示例使用 `digital-flow-sdk/local-assets/runtime/` 下的授权运行时和 `digital-flow-sdk/local-assets/data/5min/` 下的五分钟数据包。可用版本见[运行时指纹](digital-flow-sdk/runtime-manifests/supermap3d-w3d-tested.json)。
-
-在 Windows 上，分别进入 `digital-flow-field/tdesign/` 和 `digital-flow-sdk/` 执行 `npm.cmd ci` 安装依赖。准备完成后，在对应工程目录双击 `启动5分钟流场.cmd` 或 `启动SDK示例.cmd`。
+1. 双击 [启动5分钟流场.cmd](digital-flow-field/启动5分钟流场.cmd)，打开 [流场演示](http://127.0.0.1:5175/)。
+2. 双击 [启动SDK示例.cmd](digital-flow-sdk/启动SDK示例.cmd)，打开 [原生示例](http://127.0.0.1:5185/examples/vanilla/)。同一服务也提供 [Vue + TDesign 示例](http://127.0.0.1:5185/examples/vue/)。

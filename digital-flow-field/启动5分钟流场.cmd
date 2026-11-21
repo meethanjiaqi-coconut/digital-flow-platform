@@ -14,9 +14,12 @@ if not errorlevel 1 (
 )
 cd /d "%~dp0tdesign"
 if not exist "node_modules\vite\bin\vite.js" (
-    echo 请先在 tdesign 目录运行 npm.cmd ci 安装项目依赖。
-    pause
-    exit /b 1
+    call npm.cmd ci
+    if errorlevel 1 (
+        echo 依赖安装失败，请检查 npm 输出后重试。
+        pause
+        exit /b 1
+    )
 )
 call npm.cmd run dev:demo -- --host 127.0.0.1 --port 5175 --strictPort --open
 pause

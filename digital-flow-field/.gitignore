@@ -5,7 +5,12 @@ dist/
 .claude-flow/
 flow-field-service/target/
 output/
+!/output/
+/output/*
+!/output/flowfield-5min-verified/
 __pycache__/
 *.pyc
 *.DAT
 tdesign/public/data/flowfield/*.bin
+!tdesign/public/data/flowfield/mesh.bin
+!tdesign/public/data/flowfield/frames.bin

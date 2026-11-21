@@ -5,3 +5,4 @@
 *.gz binary
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+/local-assets/** -text
