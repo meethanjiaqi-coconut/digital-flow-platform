@@ -12,6 +12,7 @@
     "typecheck": "tsc",
     "dev": "node scripts/serve-demo.mjs",
     "verify:baseline": "node scripts/verify-baseline.mjs",
+    "verify:browser": "node scripts/browser-run.mjs --headless",
     "pack:local": "node scripts/pack.mjs",
     "verify:packages": "node scripts/verify-packages.mjs"
   },

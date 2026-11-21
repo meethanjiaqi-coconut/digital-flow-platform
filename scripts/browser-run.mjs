@@ -1,25 +1,46 @@
 // Browser regression runner: executes scripts/browser-validate.js and
 // scripts/browser-examples.js (async (page) => {...} functions) against the
-// static demo server, then captures the five H2 comparison screenshots and
-// writes a consolidated report to output/playwright/.
-// Usage: node scripts/browser-serve must already be running on :5185
-//   npm run dev   (separate terminal / background)
+// static demo server (auto-started if port 5185 is not already listening),
+// then captures the five H2 comparison screenshots and writes a consolidated
+// report to output/playwright/.
 import { chromium } from 'file:///D:/nodejs/node_global/node_modules/playwright/index.mjs'
+import { spawn } from 'node:child_process'
 import { readFile, writeFile, mkdir, copyFile } from 'node:fs/promises'
 
 const BASE = 'http://127.0.0.1:5185'
 const OUT = 'output/playwright'
 const loadScript = async name => eval(`(${await readFile(new URL(`./browser-${name}.js`, import.meta.url), 'utf8')})`)
 
-const headed = process.env.PW_HEADLESS !== '1'
+async function ensureServer() {
+  const probe = async () => {
+    try {
+      const r = await fetch(`${BASE}/examples/vanilla/`, { signal: AbortSignal.timeout(800) })
+      return r.ok
+    } catch { return false }
+  }
+  if (await probe()) return null
+  const child = spawn(process.execPath, [new URL('./serve-demo.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')], { stdio: 'ignore' })
+  for (let i = 0; i < 30; i++) {
+    if (child.exitCode !== null) throw new Error(`Demo server exited early with ${child.exitCode}`)
+    if (await probe()) return child
+    await new Promise(r => setTimeout(r, 200))
+  }
+  child.kill()
+  throw new Error('Timed out waiting for demo server on :5185')
+}
+
+const serverProc = await ensureServer()
+const headed = process.env.PW_HEADLESS !== '1' && !process.argv.includes('--headless')
 let browser
 try {
   browser = await chromium.launch({
     headless: !headed,
-    args: ['--enable-gpu', '--ignore-gpu-blocklist', '--enable-accelerated-2d-canvas']
+    args: headed
+      ? ['--enable-gpu', '--ignore-gpu-blocklist', '--enable-accelerated-2d-canvas']
+      : ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist']
   })
 } catch (error) {
-  console.log('headed launch failed, retrying headless with GPU flags:', error.message)
+  console.log('launch failed, retrying headless with GPU flags:', error.message)
   browser = await chromium.launch({
     headless: true,
     args: ['--use-angle=d3d11', '--enable-gpu', '--ignore-gpu-blocklist']
@@ -87,5 +108,9 @@ try {
 } finally {
   await writeFile(`${OUT}/h2-report.json`, JSON.stringify(report, null, 2))
   await browser.close()
+  if (serverProc && serverProc.exitCode === null) serverProc.kill()
 }
 console.log(JSON.stringify({ gpu: report.gpu, lifecycle: report.phases.lifecycle?.lifecyclePassed, examples: report.phases.examples, pageErrors, failedRequests }, null, 2))
+if (pageErrors.length || failedRequests.length || !report.phases.lifecycle?.lifecyclePassed) {
+  process.exitCode = 1
+}

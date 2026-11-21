@@ -34,6 +34,13 @@ function harness(config={}) {
 test('default is paused; ISO seek uses actual irregular timestamps; query preserves physical units',async()=>{
   const {flow,live}=harness()
   await flow.loadScenario()
+  assert.equal(flow.getState().nodeCount, 4)
+  assert.equal(flow.getState().cellCount, 2)
+  assert.deepEqual(flow.getState().frameTimes, [
+    '2026-10-24T16:00:00.000Z',
+    '2026-10-24T16:05:00.000Z',
+    '2026-10-24T16:15:00.000Z'
+  ])
   assert.equal(flow.getState().playing,false)
   assert.equal(flow.getState().options.particles.trailSeconds,1.5)
   await flow.seek('2026-10-25T00:10:00+08:00')

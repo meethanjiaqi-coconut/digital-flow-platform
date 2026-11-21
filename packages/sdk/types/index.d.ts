@@ -242,8 +242,11 @@ export interface FlowState {
   sourceRunId: string | null
   scenarioName: string | null
   meshId: string | null
+  nodeCount: number
+  cellCount: number
   frameCount: number
   frameIntervalSeconds: number | null
+  readonly frameTimes: readonly string[]
   requestedFrame: number
   displayedFrame: number
   requestedTime: string | null
@@ -252,7 +255,7 @@ export interface FlowState {
   endTime: string | null
   stats: FlowStats
   options: FlowOptions
-  tidal: { status: string; active?: boolean; visualOnly?: boolean }
+  tidal: { status: string; active?: boolean; reason?: string; visualOnly?: boolean }
   capabilities: FlowCapabilities
 }
 

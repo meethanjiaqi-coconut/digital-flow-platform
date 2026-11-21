@@ -1,7 +1,15 @@
 import {createFlowField,createStaticProvider,createHttpProvider,FlowError,isFlowError,VERSION,type FlowState,type FlowSample,type Series,type Scenario} from '@digital-flow/sdk'
 import {createSuperMap3DRenderer} from '@digital-flow/sdk/supermap3d'
 import {createTidalEstuary,qiantangProfile} from '@digital-flow/sdk/tidal-estuary'
-import {FlowControls} from '@digital-flow/vue-tdesign'
+import {
+  DigitalFlowField,
+  FlowControls,
+  FlowLegend,
+  FlowMiniChart,
+  FlowQueryPopup,
+  FlowScenarioSelector,
+  FlowTimeline
+} from '@digital-flow/vue-tdesign'
 import {h} from 'vue'
 declare const viewer: unknown,SuperMap3D: unknown,w3d: unknown
 const flow=createFlowField({
@@ -19,7 +27,11 @@ flow.on('warning',w=>console.log(w.code,w.message))
 flow.on('scenariochange',c=>console.log(c.previous,c.current))
 flow.on('timechange',c=>console.log(c.displayedTime,c.displayedFrame))
 flow.on('ready',s=>console.log(s.status))
-h(FlowControls,{flow})
+h(FlowControls, { flow, collapsible: true, showLocate: true })
+h(FlowTimeline, { flow, wide: false })
+h(FlowLegend, { flow, mode: 'speed' })
+h(FlowScenarioSelector, { flow })
+h(DigitalFlowField, { flow, placement: 'right', showTimeline: true, 'onScenario-change': (id: string) => console.log(id) })
 const caps=flow.getCapabilities()
 const diag=flow.getDiagnostics()
 console.log(VERSION,caps.scenarios,caps.series,caps.worker,caps.maxNodes,diag.provider,diag.warnings.length)
@@ -32,6 +44,8 @@ const sample:FlowSample|null=await flow.queryAt({lon:120,lat:30,time:'2026-01-01
 console.log(sample?.status,sample?.wetTransition,sample?.dirDeg)
 const series:Series=await flow.querySeries({cell:0})
 console.log(series.source,series.points.length)
+h(FlowMiniChart, { series, currentTime: sample?.time })
+h(FlowQueryPopup, { flow, sample, series, loading: false })
 const picked:FlowSample|null=await flow.pick({x:1,y:2})
 console.log(picked?.cell)
 const done:Promise<void>=flow.destroy()

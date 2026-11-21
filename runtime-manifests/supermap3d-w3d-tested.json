@@ -1,11 +1,18 @@
 {
-  "sdkVersion": "0.1.0-alpha.1",
+  "sdkVersion": "0.1.0-alpha.2",
   "policy": "Host supplies licensed runtime. Not distributed in npm packages.",
   "files": [
     {
       "path": "SuperMap3D/SuperMap3D.js",
       "bytes": 11345652,
-      "sha256": "b59329245ebe142e428ad06d2bfd3e6467d0d15ccdaac04cc7d534a14e00e057"
+      "sha256": "b59329245ebe142e428ad06d2bfd3e6467d0d15ccdaac04cc7d534a14e00e057",
+      "source": "digital-flow-field"
+    },
+    {
+      "path": "SuperMap3D/SuperMap3D.js",
+      "bytes": 11200265,
+      "sha256": "cf9a5b501347b92c9106f3db05b4270c6b6014e96ee31a9da69860875ade7f01",
+      "source": "qiantangjiang"
     },
     {
       "path": "w3d/w3d.umd.js",

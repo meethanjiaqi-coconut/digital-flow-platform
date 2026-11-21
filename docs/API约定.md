@@ -25,7 +25,7 @@
 | `seek(time, {signal?})` | `time` 为 Date 或 ISO 字符串；**越界钳制**到首末时刻（非法值才抛 INVALID_ARGUMENT）；跨越超过 1 帧或循环回首帧时重置渲染拖尾。失败时位置回退到 displayed。 |
 | `play()` / `pause()` / `setPlaybackRate(r)` / `setOptions(patch)` / `setVisible(b)` | 播放控制；rate 0.1～16；setOptions 先完整校验再应用，`tidal` 变更会重新应用当前帧对。 |
 | `reinitialize()` | 上下文丢失恢复：销毁并重新 attach 渲染会话，恢复当前画面与选项（未加载抛 NOT_READY）。 |
-| `getState()` | 独立快照，时刻统一 ISO UTC；含 `status/switching/playing/buffering/suspended/rate/secondsPerFrame/loop/timeZone/error/progress/scenarioId/sourceRunId/scenarioName/meshId/frameCount/frameIntervalSeconds/requestedFrame/displayedFrame/requestedTime/displayedTime/startTime/endTime/stats/options/tidal/capabilities`。 |
+| `getState()` | 独立快照，时刻统一 ISO UTC；含 `version/status/switching/playing/buffering/suspended/rate/secondsPerFrame/loop/timeZone/error/progress/scenarioId/sourceRunId/scenarioName/meshId/nodeCount/cellCount/frameCount/frameIntervalSeconds/frameTimes/requestedFrame/displayedFrame/requestedTime/displayedTime/startTime/endTime/stats/options/tidal/capabilities`。 |
 | `getCapabilities()` | `{scenarios, series:'provider'\|'frames', worker:'worker'\|'main-thread'\|'none', tidal:{available,reason?}, maxNodes:65535, renderer}`；同时见 `state.capabilities`。 |
 | `getDiagnostics()` | `{rawFramesCached,nodeFramesCached,pendingRequests,tidalHistoryFrames,tidalHistoryBytes,worker,provider:getStats(),warnings:最近20条}`；不含 URL。 |
 | `queryAt({lon,lat,time?}, {signal?})` | `time` 缺省查 displayedFrame，给定时按钳制后时刻查；**域外返回 null**；返回 `{status:'wet'\|'dry',cell,lon,lat,time,wet,wetTransition,level,u,v,speed,dirDeg}`——两帧均干为 `status:'dry'` 且数值全 null；一干一湿取湿帧值并 `wetTransition:true`；`speed<1e-6` 时 `dirDeg:null`；缺帧/请求失败抛 FlowError。level 单位 m，u/v/speed 单位 m/s，dirDeg 为从正北顺时针流向角。 |

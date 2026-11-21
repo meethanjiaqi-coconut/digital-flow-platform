@@ -41,6 +41,17 @@ export function frameForTime(ctx, time) {
 }
 
 const intervalCache = new WeakMap()
+const frameTimesCache = new WeakMap()
+const EMPTY_TIMES = Object.freeze([])
+
+function frameTimesFor(data) {
+  if (!data) return EMPTY_TIMES
+  if (frameTimesCache.has(data)) return frameTimesCache.get(data)
+  const list = Object.freeze(data.meta.times.map(t => isoTime(t)).filter(Boolean))
+  frameTimesCache.set(data, list)
+  return list
+}
+
 function frameInterval(data) {
   if (intervalCache.has(data)) return intervalCache.get(data)
   let result = null
@@ -103,8 +114,11 @@ export function getState(ctx) {
     sourceRunId: data?.manifest?.sourceRunId ?? null,
     scenarioName: data?.manifest?.scenarioName ?? null,
     meshId: data?.meshId ?? null,
+    nodeCount: data?.nNodes ?? 0,
+    cellCount: data?.nCells ?? 0,
     frameCount: data?.nFrames ?? 0,
     frameIntervalSeconds: data ? frameInterval(data) : null,
+    frameTimes: frameTimesFor(data),
     requestedFrame: ctx.position,
     displayedFrame: ctx.displayed,
     requestedTime: timeAt(ctx, ctx.position),

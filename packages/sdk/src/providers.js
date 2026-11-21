@@ -133,7 +133,8 @@ export function createHttpProvider({ baseUrl, request = globalThis.fetch, retry,
   return {
     getStats,
     listScenarios: (context = {}) => call(`${base}/api/v1/scenarios`, { ...context, kind: 'data', consume: consumeJson, operation: 'scenarios' }).then(scenarioList),
-    loadManifest: (selection = {}, context = {}) => call(`${route(selectionId(selection))}/manifest`, { ...context, kind: 'manifest', consume: consumeJson, operation: 'manifest' }),
+    loadManifest: (selection = {}, context = {}) => call(`${route(selectionId(selection))}/manifest`, { ...context, kind: 'manifest', consume: consumeJson, operation: 'manifest' })
+      .then(m => (m && typeof m === 'object' ? { ...m, scenarioId: m.scenarioId ?? m.sourceRunId } : m)),
     getMesh: (m, context = {}) => call(`${base}/api/v1/meshes/${encodeURIComponent(m.mesh.meshId)}`, { ...context, kind: 'data', consume: consumeBinary, operation: 'mesh' }),
     getFrame: (m, index, context = {}) => call(`${route(m.scenarioId)}/frames/${index}`, { ...context, kind: 'data', consume: consumeBinary, operation: 'frame' }),
     querySeries: (m, cell, context = {}) => call(`${route(m.scenarioId)}/cells/${cell}/series`, { ...context, kind: 'data', consume: consumeJson, operation: 'series' })

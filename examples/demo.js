@@ -12,6 +12,7 @@ export async function createDemo() {
     imageryProvider:new S.UrlTemplateImageryProvider({url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',maximumLevel:18})
   })
   viewer.scene.globe.depthTestAgainstTerrain=false
+  viewer.screenSpaceEventHandler?.removeInputAction?.(S.ScreenSpaceEventType.LEFT_CLICK)
   // Locating the river and handling clicks are explicit host actions, not SDK defaults.
   viewer.camera.setView({destination:S.Cartesian3.fromDegrees(120.65,30.35,125000),orientation:{heading:0,pitch:-Math.PI/2,roll:0}})
   const provider=createStaticProvider({manifestUrl:new URL('local-assets/data/5min/package.json',root).href})
@@ -29,8 +30,8 @@ export async function createDemo() {
   globalThis.demoFlow=flow
   globalThis.sdkDemo={viewer,provider,create,baseline}
   const query=document.querySelector('#query')
-  const handler=new S.ScreenSpaceEventHandler(viewer.scene.canvas)
-  handler.setInputAction(async ({position})=>{
+  const handler=query?new S.ScreenSpaceEventHandler(viewer.scene.canvas):null
+  handler?.setInputAction(async ({position})=>{
     try {
       const value=await flow.pick({x:position.x,y:position.y})
       query.textContent=!value ? '当前位置无模型数据'
@@ -38,7 +39,7 @@ export async function createDemo() {
         : `水位 ${value.level?.toFixed(2) ?? '—'} m · 流速 ${value.speed?.toFixed(2) ?? '—'} m/s · 流向 ${value.dirDeg==null?'—':value.dirDeg.toFixed(0)+'°'}`
     }catch(e){query.textContent=e.message}
   },S.ScreenSpaceEventType.LEFT_CLICK)
-  window.addEventListener('pagehide',()=>{handler.destroy();flow.destroy();viewer.destroy()},{once:true})
+  window.addEventListener('pagehide',()=>{handler?.destroy();flow.destroy();viewer.destroy()},{once:true})
   flow.on('error',e=>{document.querySelector('#status').textContent=e.message})
   await flow.loadScenario({sourceRunId:'RST-WUV-20261025-5MIN'})
   return flow
